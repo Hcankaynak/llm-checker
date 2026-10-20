@@ -57,6 +57,8 @@ class BenchmarkManager(
         return state
     }
 
+    fun isBusy(): Boolean = jobs.values.any { it.isActive }
+
     fun get(id: String): RunState? = live[id]?.get() ?: store.get(id)
 
     fun list(): List<RunState> {

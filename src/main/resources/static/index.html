@@ -14,7 +14,8 @@
       <small>vLLM performance &amp; compatibility</small>
     </div>
     <nav class="tabs" id="tabs">
-      <button data-tab="connection" class="active">Connection</button>
+      <button data-tab="dashboard" class="active">Dashboard</button>
+      <button data-tab="connection">Connection</button>
       <button data-tab="checks">Compatibility</button>
       <button data-tab="bench">Benchmark</button>
       <button data-tab="history">History</button>
@@ -23,7 +24,64 @@
   </header>
 
   <main>
-    <section id="tab-connection" class="tab active">
+    <section id="tab-dashboard" class="tab active">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Model performance</h2>
+            <p class="muted" style="margin:0">Average speed and response time per model, from background probes and your benchmark history.</p>
+          </div>
+          <div class="row" style="margin:0">
+            <label class="inline">Window
+              <select id="dashWindow">
+                <option value="60">Last hour</option>
+                <option value="360">Last 6 hours</option>
+                <option value="1440" selected>Last 24 hours</option>
+                <option value="10080">Last 7 days</option>
+                <option value="0">All time</option>
+              </select>
+            </label>
+            <button class="ghost small" id="dashRefresh">Refresh</button>
+          </div>
+        </div>
+        <div id="dashKpis" class="kpis"></div>
+      </div>
+
+      <div id="dashModels" class="model-cards"></div>
+      <div id="dashCharts" class="charts" style="margin-bottom:16px"></div>
+
+      <div class="grid two">
+        <form class="card" id="monitorForm">
+          <h2>Background probes</h2>
+          <p class="muted">Sends one small, uncached request to each selected model on a schedule so you get a continuous speed and latency trend. Probes pause automatically while a benchmark runs.</p>
+          <label class="check"><input id="monEnabled" type="checkbox"> Run probes automatically</label>
+          <div class="row two-col">
+            <label>Every (seconds) <input id="monInterval" type="number" min="5" max="86400" value="60"></label>
+            <label>Protocol
+              <select id="monProtocol"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select>
+            </label>
+          </div>
+          <div class="row two-col">
+            <label>Prompt tokens <input id="monPrompt" type="number" min="16" max="32000" value="256"></label>
+            <label>Output tokens <input id="monOutput" type="number" min="1" max="2048" value="64"></label>
+          </div>
+          <label>Models to probe</label>
+          <div id="monModels" class="checks muted">Connect to a server to choose models.</div>
+          <div class="row">
+            <button class="primary" type="submit">Save</button>
+            <button type="button" id="probeNow">Probe now</button>
+            <button type="button" class="ghost danger" id="clearSamples">Clear probe data</button>
+          </div>
+          <div id="monMsg" class="msg"></div>
+        </form>
+        <div class="card">
+          <h2>Recent probes</h2>
+          <div id="recentProbes" class="muted">No probes yet.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-connection" class="tab">
       <div class="grid two">
         <form class="card" id="settingsForm">
           <h2>vLLM endpoint</h2>

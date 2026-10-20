@@ -112,4 +112,25 @@ class IntegrationTest {
         delay(300)
         assertEquals("cancelled", manager.get(first.id)!!.status)
     }
+
+    @Test
+    fun monitorProbesStoreSamplesAndFeedTheDashboard() = runBlocking {
+        val dir = Files.createTempDirectory("monitor")
+        val store = SettingsStore(dir.resolve("s.json"), settings)
+        val manager = BenchmarkManager(this, RunStore(dir.resolve("runs")), store)
+        val monitor = MonitorService(this, store, manager, dir)
+        monitor.update(MonitorConfig(enabled = false, models = listOf("mock-model", "mock-coder-32b"), promptTokens = 200, outputTokens = 20))
+
+        val taken = monitor.probeNow()
+        assertEquals(2, taken.size)
+        assertTrue(taken.all { it.ok && it.completionTokens == 20 && it.decodeTps != null })
+
+        val dashboard = computeDashboard(emptyList(), monitor.samples(0, null), 60)
+        assertEquals(listOf("mock-coder-32b", "mock-model"), dashboard.models.map { it.model })
+        assertTrue(dashboard.models.all { (it.probe?.avgTps ?: 0.0) > 0 })
+
+        val reloaded = MonitorService(this, store, manager, dir)
+        assertEquals(2, reloaded.samples(0, null).size)
+        assertEquals(listOf("mock-model", "mock-coder-32b"), reloaded.status().config.models)
+    }
 }

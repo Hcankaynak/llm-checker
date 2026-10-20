@@ -92,3 +92,60 @@ class UnitTests {
         assertEquals(mapOf("HTTP 500" to 1), stage.errors)
     }
 }
+
+class DashboardTests {
+    private fun sample(ts: Long, model: String, tps: Double?, total: Double, ok: Boolean = true) =
+        MonitorSample(ts, model, "openai", ok, if (ok) null else "boom", ttftMs = 100.0, totalMs = total, decodeTps = tps, completionTokens = 64, promptTokens = 200)
+
+    @Test
+    fun probeStatsAverageOnlySuccessfulSamples() {
+        val stats = computeProbeStats(
+            listOf(
+                sample(1, "m", 40.0, 1000.0),
+                sample(2, "m", 60.0, 2000.0),
+                sample(3, "m", null, 50.0, ok = false),
+            ),
+        )!!
+        assertEquals(3, stats.samples)
+        assertEquals(1, stats.failures)
+        assertEquals(50.0, stats.avgTps!!, 1e-9)
+        assertEquals(1500.0, stats.avgResponseMs!!, 1e-9)
+        assertEquals(60.0, stats.lastTps!!, 1e-9)
+        assertEquals("boom", stats.lastError)
+        assertEquals(2.0 / 3.0, stats.successRate, 1e-9)
+    }
+
+    @Test
+    fun dashboardGroupsPerModelAndRespectsWindow() {
+        val now = 100_000_000L
+        val samples = listOf(
+            sample(now - 10 * 60_000, "a", 30.0, 1000.0),
+            sample(now - 5 * 60_000, "a", 50.0, 3000.0),
+            sample(now - 5 * 60_000, "b", 80.0, 500.0),
+            sample(now - 3 * 3_600_000, "a", 5.0, 9000.0),
+        )
+        val within = computeDashboard(emptyList(), samples, windowMinutes = 60, now = now)
+        assertEquals(listOf("a", "b"), within.models.map { it.model })
+        assertEquals(40.0, within.models[0].probe!!.avgTps!!, 1e-9)
+        assertEquals(3, within.totalProbes)
+
+        val all = computeDashboard(emptyList(), samples, windowMinutes = 0, now = now)
+        assertEquals(4, all.totalProbes)
+    }
+
+    @Test
+    fun benchStatsUseLowestConcurrencyStage() {
+        fun req(i: Int, tps: Double) = RequestResult(i, true, ttftMs = 200.0, totalMs = 2000.0, decodeTps = tps, completionTokens = 10)
+        fun stage(c: Int, tps: Double, out: Double) = StageResult(
+            c, 2, 2, 0, 1.0, out, 0.0, 0.0, requests = listOf(req(0, tps), req(1, tps)),
+        )
+        val run = RunState(
+            id = "r1", status = "completed", phase = "done", request = BenchmarkRequest(model = "m"), baseUrl = "x",
+            createdAt = 1, finishedAt = 2, stages = listOf(stage(4, 10.0, 300.0), stage(1, 50.0, 90.0)),
+        )
+        val stats = computeBenchStats(listOf(run))!!
+        assertEquals(50.0, stats.avgTps!!, 1e-9)
+        assertEquals(300.0, stats.peakOutputTps!!, 1e-9)
+        assertEquals(2, stats.requests)
+    }
+}

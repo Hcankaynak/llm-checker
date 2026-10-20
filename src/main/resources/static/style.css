@@ -145,3 +145,21 @@ td.left, th.left { text-align: left; }
 .delta-down { color: var(--bad); }
 
 .toast { position: fixed; right: 20px; bottom: 20px; background: var(--panel-2); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.4); z-index: 50; }
+
+.model-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.model-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; border-top: 3px solid var(--accent); min-width: 0; }
+.model-card h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; word-break: break-all; }
+.model-card .big { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 10px 0 12px; }
+.model-card .big .value { font-size: 34px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.model-card .big .value small { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.model-card .big .cap { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.model-card .spark { width: 150px; height: 42px; flex: none; }
+.mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mini div { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
+.mini .k { color: var(--muted); font-size: 11.5px; }
+.mini .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.bench-line { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12.5px; color: var(--muted); }
+.bench-line b { color: var(--text); font-weight: 600; }
+.checks { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-height: 180px; overflow-y: auto; }
+.checks label { margin: 0; font-weight: 400; display: flex; gap: 8px; align-items: center; }
+.swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }

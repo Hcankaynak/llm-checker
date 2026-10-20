@@ -20,13 +20,16 @@ import kotlinx.serialization.encodeToString
 private val idPattern = Regex("^[a-z0-9-]{4,40}$")
 
 @Serializable
+private data class ProbeRequest(val models: List<String>? = null)
+
+@Serializable
 private data class Health(val ok: Boolean, val version: String, val mockAvailable: Boolean)
 
 fun Route.staticRoutes() {
     staticResources("/", "static") { default("index.html") }
 }
 
-fun Route.apiRoutes(config: AppConfig, settings: SettingsStore, manager: BenchmarkManager) {
+fun Route.apiRoutes(config: AppConfig, settings: SettingsStore, manager: BenchmarkManager, monitor: MonitorService) {
     fun view(s: Settings) = SettingsView(
         baseUrl = s.baseUrl, hasApiKey = !s.apiKey.isNullOrBlank(), skipTlsVerify = s.skipTlsVerify,
         requestTimeoutSec = s.requestTimeoutSec, mockAvailable = config.mockEnabled,
@@ -71,6 +74,30 @@ fun Route.apiRoutes(config: AppConfig, settings: SettingsStore, manager: Benchma
             require(req.model.isNotBlank()) { "model is required" }
             val results = VllmClient(settings.get()).use { runCompatibilityChecks(it, req.model) }
             call.respond(ChecksResponse(req.model, results))
+        }
+
+        get("/dashboard") {
+            val minutes = call.request.queryParameters["minutes"]?.toIntOrNull()?.coerceIn(0, 525_600) ?: 1440
+            val since = if (minutes <= 0) 0L else System.currentTimeMillis() - minutes * 60_000L
+            call.respond(computeDashboard(manager.list(), monitor.samples(since, null, 5000), minutes))
+        }
+
+        route("/monitor") {
+            get { call.respond(monitor.status()) }
+            put { call.respond(monitor.update(call.receive<MonitorConfig>())) }
+            post("/probe") {
+                val req = runCatching { call.receive<ProbeRequest>() }.getOrDefault(ProbeRequest())
+                call.respond(monitor.probeNow(req.models))
+            }
+            get("/samples") {
+                val minutes = call.request.queryParameters["minutes"]?.toIntOrNull()?.coerceIn(0, 525_600) ?: 1440
+                val since = if (minutes <= 0) 0L else System.currentTimeMillis() - minutes * 60_000L
+                call.respond(monitor.samples(since, call.request.queryParameters["model"]))
+            }
+            delete("/samples") {
+                monitor.clearSamples()
+                call.respond(HttpStatusCode.NoContent)
+            }
         }
 
         route("/runs") {

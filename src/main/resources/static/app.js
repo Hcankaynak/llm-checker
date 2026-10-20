@@ -50,6 +50,7 @@ function showTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   location.hash = name;
   if (name === "history") loadHistory();
+  if (name === "dashboard") loadDashboard();
 }
 $("tabs").addEventListener("click", (e) => { if (e.target.dataset.tab) showTab(e.target.dataset.tab); });
 
@@ -114,6 +115,7 @@ async function loadModels(fromSave = false) {
     renderModels();
     refreshModelSelects();
     refreshMetrics();
+    renderMonitorModels();
   } catch (err) {
     state.models = [];
     setPill("bad", state.settings?.baseUrl ? "Connection failed" : "Not connected");
@@ -496,6 +498,206 @@ $("compareBtn").addEventListener("click", async () => {
   $("compareBox").scrollIntoView({ behavior: "smooth" });
 });
 
+/* ---------- dashboard ---------- */
+const PALETTE = ["#4f9cf9", "#3fb950", "#f0883e", "#a78bfa", "#f778ba", "#39c5cf", "#d29922", "#ff7b72"];
+const dash = { monitor: null, samples: [], data: null };
+const colorFor = (model, models) => PALETTE[Math.max(0, models.indexOf(model)) % PALETTE.length];
+
+async function loadDashboard() {
+  const minutes = $("dashWindow").value;
+  try {
+    const [data, samples, monitor] = await Promise.all([
+      api("/api/dashboard?minutes=" + minutes),
+      api("/api/monitor/samples?minutes=" + minutes),
+      api("/api/monitor"),
+    ]);
+    dash.data = data; dash.samples = samples; dash.monitor = monitor;
+    renderDashboard();
+  } catch (err) {
+    $("dashKpis").innerHTML = `<p class="errors">${esc(err.message)}</p>`;
+  }
+}
+
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
+}
+
+function renderDashboard() {
+  const { data, samples } = dash;
+  const models = data.models.map((m) => m.model);
+  const ok = samples.filter((s) => s.ok);
+  const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+  const tps = mean(ok.map((s) => s.decodeTps).filter((v) => v != null));
+  const resp = mean(ok.map((s) => s.totalMs));
+  const ttft = mean(ok.map((s) => s.ttftMs).filter((v) => v != null));
+
+  const kp = [];
+  kp.push(kpi("Average speed", fmt.n(tps, 1), "tok/s", ok.length ? `decode speed per request, ${ok.length} probes` : "no probe data yet"));
+  kp.push(kpi("Average response time", fmt.ms(resp), "", ok.length ? `full reply, ${dash.monitor?.config.outputTokens ?? 64} output tokens` : "no probe data yet"));
+  kp.push(kpi("Average time to first token", fmt.ms(ttft), "", "how long before streaming starts"));
+  kp.push(kpi("Probe success rate", samples.length ? fmt.pct(ok.length / samples.length) : "-", "", `${samples.length - ok.length} failed of ${samples.length}`));
+  kp.push(kpi("Benchmark runs", String(data.totalBenchRuns), "", "in this window"));
+  $("dashKpis").innerHTML = kp.join("");
+
+  if (!models.length) {
+    $("dashModels").innerHTML = `<div class="card empty" style="grid-column:1/-1"><h3>No data in this window</h3><p class="muted">Turn on background probes below, press <strong>Probe now</strong>, or run a benchmark. Averages appear here as soon as there is data.</p></div>`;
+  } else {
+    $("dashModels").innerHTML = data.models.map((m) => modelCard(m, models)).join("");
+  }
+  renderDashCharts(models);
+  renderMonitorPanel();
+  renderRecentProbes(models);
+}
+
+function modelCard(m, models) {
+  const color = colorFor(m.model, models);
+  const p = m.probe, b = m.bench;
+  const headTps = p?.avgTps ?? b?.avgTps;
+  const source = p?.avgTps != null ? `avg of ${p.samples - p.failures} probes` : b?.avgTps != null ? `avg of ${b.requests} benchmark requests` : "no successful requests";
+  const spark = sparkline(dash.samples.filter((s) => s.model === m.model && s.ok && s.decodeTps != null).map((s) => s.decodeTps), color);
+  const statusBadge = p?.lastError ? `<span class="badge fail" title="${esc(p.lastError)}">last probe failed</span>` : "";
+  const mini = p ? `<div class="mini">
+      <div><div class="k">Avg response</div><div class="v">${fmt.ms(p.avgResponseMs)}</div></div>
+      <div><div class="k">p95 response</div><div class="v">${fmt.ms(p.p95ResponseMs)}</div></div>
+      <div><div class="k">Avg TTFT</div><div class="v">${fmt.ms(p.avgTtftMs)}</div></div>
+      <div><div class="k">Last speed</div><div class="v">${p.lastTps != null ? fmt.n(p.lastTps, 1) + " tok/s" : "-"}</div></div>
+      <div><div class="k">Success</div><div class="v">${fmt.pct(p.successRate)}</div></div>
+      <div><div class="k">Last probe</div><div class="v">${ago(p.lastAt)}</div></div></div>` : `<p class="muted" style="margin:0">No probes for this model in the window.</p>`;
+  const bench = b ? `<div class="bench-line">Benchmarks (${b.runs} run${b.runs === 1 ? "" : "s"}, lowest concurrency): <b>${fmt.n(b.avgTps, 1)} tok/s</b>, TTFT <b>${fmt.ms(b.avgTtftMs)}</b>, response <b>${fmt.ms(b.avgResponseMs)}</b>${b.peakOutputTps != null ? `, peak aggregate <b>${fmt.n(b.peakOutputTps, 0)} tok/s</b>` : ""}</div>` : "";
+  return `<div class="model-card" style="border-top-color:${color}">
+    <h3><span class="swatch" style="background:${color}"></span>${esc(m.model)} ${statusBadge}</h3>
+    <div class="big"><div><div class="value">${fmt.n(headTps, 1)}<small>tok/s</small></div><div class="cap">average decode speed \u00b7 ${esc(source)}</div></div>${spark}</div>
+    ${mini}${bench}</div>`;
+}
+
+function sparkline(values, color) {
+  if (values.length < 2) return '<svg class="spark"></svg>';
+  const v = values.slice(-40);
+  const min = Math.min(...v), max = Math.max(...v), span = max - min || 1;
+  const pts = v.map((y, i) => `${((i / (v.length - 1)) * 148 + 1).toFixed(1)},${(40 - ((y - min) / span) * 36 - 2).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 150 42" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+function renderDashCharts(models) {
+  const ok = dash.samples.filter((s) => s.ok);
+  if (ok.length < 2) { $("dashCharts").innerHTML = ""; return; }
+  const build = (title, key, unit) => {
+    const series = models.map((m) => ({
+      name: m, color: colorFor(m, models),
+      points: ok.filter((s) => s.model === m && s[key] != null).map((s) => [s.ts, s[key]]),
+    })).filter((s) => s.points.length);
+    return `<div class="card chart"><h3>${title}</h3>${timeChart(series, unit)}</div>`;
+  };
+  $("dashCharts").innerHTML = build("Decode speed over time", "decodeTps", "tok/s") + build("Response time over time", "totalMs", "ms") + build("Time to first token over time", "ttftMs", "ms");
+}
+
+function timeChart(series, unit) {
+  const W = 520, H = 230, m = { l: 54, r: 14, t: 14, b: 30 };
+  const all = series.flatMap((s) => s.points);
+  if (!all.length) return '<p class="muted">No data</p>';
+  const t0 = Math.min(...all.map((p) => p[0])), t1 = Math.max(...all.map((p) => p[0]));
+  const rawMax = Math.max(...all.map((p) => p[1])) * 1.1 || 1;
+  const step = niceStep(rawMax / 4), max = Math.ceil(rawMax / step) * step;
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const x = (t) => m.l + (t1 === t0 ? iw / 2 : ((t - t0) / (t1 - t0)) * iw);
+  const y = (v) => m.t + ih - (v / max) * ih;
+  let g = "";
+  for (let v = 0; v <= max + 1e-9; v += step) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="#2a3441"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end" fill="#8b98a8" font-size="11">${fmtAxis(v)}</text>`;
+  const spanH = (t1 - t0) / 3600000;
+  for (let i = 0; i < 4; i++) {
+    const t = t0 + ((t1 - t0) * i) / 3;
+    const d = new Date(t);
+    const label = spanH > 36 ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    g += `<text x="${x(t)}" y="${H - 8}" text-anchor="${i === 0 ? "start" : i === 3 ? "end" : "middle"}" fill="#8b98a8" font-size="11">${label}</text>`;
+  }
+  g += `<text x="12" y="${m.t + 4}" fill="#8b98a8" font-size="10.5">${esc(unit)}</text>`;
+  series.forEach((s) => {
+    const path = s.points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
+    g += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
+    if (s.points.length <= 60) s.points.forEach((p) => { g += `<circle cx="${x(p[0]).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="2.8" fill="${s.color}"><title>${esc(s.name)} ${new Date(p[0]).toLocaleTimeString()}: ${fmtAxis(p[1])} ${esc(unit)}</title></circle>`; });
+  });
+  const legend = series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">${g}</svg><div class="legend">${legend}</div>`;
+}
+
+function renderRecentProbes(models) {
+  const rows = dash.samples.slice(-12).reverse();
+  if (!rows.length) { $("recentProbes").className = "muted"; $("recentProbes").textContent = "No probes yet."; return; }
+  $("recentProbes").className = "";
+  $("recentProbes").innerHTML = `<div class="table-wrap"><table><thead><tr><th class="left">When</th><th class="left">Model</th><th>tok/s</th><th>TTFT</th><th>Response</th><th>Result</th></tr></thead><tbody>${rows.map((s) => `<tr>
+    <td class="left">${ago(s.ts)}</td>
+    <td class="left"><span class="swatch" style="background:${colorFor(s.model, models)}"></span> ${esc(s.model)}</td>
+    <td class="num">${fmt.n(s.decodeTps, 1)}</td><td class="num">${fmt.ms(s.ttftMs)}</td><td class="num">${fmt.ms(s.totalMs)}</td>
+    <td>${s.ok ? '<span class="badge pass">ok</span>' : `<span class="badge fail" title="${esc(s.error)}">failed</span>`}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderMonitorModels() {
+  const box = $("monModels");
+  if (!state.models.length) { box.className = "checks muted"; box.textContent = "Connect to a server to choose models."; return; }
+  const chosen = new Set(dash.monitor?.config.models || []);
+  box.className = "checks";
+  box.innerHTML = state.models.map((m) => `<label><input type="checkbox" data-mon="${esc(m.id)}" ${chosen.has(m.id) ? "checked" : ""}> ${esc(m.id)}</label>`).join("");
+}
+
+let monitorFormDirty = false;
+function renderMonitorPanel() {
+  const st = dash.monitor;
+  if (!st) return;
+  if (!monitorFormDirty) {
+    $("monEnabled").checked = st.config.enabled;
+    $("monInterval").value = st.config.intervalSec;
+    $("monProtocol").value = st.config.protocol;
+    $("monPrompt").value = st.config.promptTokens;
+    $("monOutput").value = st.config.outputTokens;
+    renderMonitorModels();
+  }
+  const parts = [];
+  if (st.config.enabled) {
+    parts.push(st.probing ? "Probing now..." : st.nextRunAt ? `Next probe in ${Math.max(0, Math.round((st.nextRunAt - Date.now()) / 1000))}s` : "Waiting for first probe");
+    parts.push(`last run ${ago(st.lastRunAt)}`);
+  } else parts.push("Automatic probes are off");
+  if (st.note) parts.push(st.note);
+  setMsg("monMsg", parts.join(" \u00b7 "), "");
+}
+
+$("monitorForm").addEventListener("input", () => { monitorFormDirty = true; });
+$("monitorForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const models = [...document.querySelectorAll("[data-mon]")].filter((c) => c.checked).map((c) => c.dataset.mon);
+  try {
+    dash.monitor = await api("/api/monitor", { method: "PUT", body: {
+      enabled: $("monEnabled").checked, intervalSec: Number($("monInterval").value), models,
+      protocol: $("monProtocol").value, promptTokens: Number($("monPrompt").value), outputTokens: Number($("monOutput").value),
+    } });
+    monitorFormDirty = false;
+    setMsg("monMsg", "Saved.", "ok");
+    toast("Probe settings saved");
+    loadDashboard();
+  } catch (err) { setMsg("monMsg", err.message, "err"); }
+});
+$("probeNow").addEventListener("click", async () => {
+  const checked = [...document.querySelectorAll("[data-mon]")].filter((c) => c.checked).map((c) => c.dataset.mon);
+  const models = checked.length ? checked : state.model ? [state.model] : [];
+  $("probeNow").disabled = true;
+  setMsg("monMsg", "Probing...", "");
+  try {
+    await api("/api/monitor/probe", { method: "POST", body: { models } });
+    monitorFormDirty = false;
+    await loadDashboard();
+  } catch (err) { setMsg("monMsg", err.message, "err"); }
+  finally { $("probeNow").disabled = false; }
+});
+$("clearSamples").addEventListener("click", async () => {
+  if (!confirm("Delete all stored probe data?")) return;
+  await api("/api/monitor/samples", { method: "DELETE" }).catch((e) => toast(e.message));
+  loadDashboard();
+});
+$("dashWindow").addEventListener("change", loadDashboard);
+$("dashRefresh").addEventListener("click", loadDashboard);
+setInterval(() => { if ($("tab-dashboard").classList.contains("active") && !document.hidden) loadDashboard(); }, 5000);
+
 /* ---------- boot ---------- */
 async function boot() {
   applyPreset("quick");
@@ -509,7 +711,9 @@ async function boot() {
     setPill("bad", err.message);
   }
   const hash = location.hash.replace("#", "");
-  if (["connection", "checks", "bench", "history"].includes(hash)) showTab(hash);
+  if (["dashboard", "connection", "checks", "bench", "history"].includes(hash)) showTab(hash);
+  else if (!state.settings?.baseUrl) showTab("connection");
+  else loadDashboard();
   try {
     const runs = await api("/api/runs");
     const active = runs.find((r) => r.status === "running");

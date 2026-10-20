@@ -31,9 +31,10 @@ fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
     val runStore = RunStore(config.dataDir.resolve("runs"))
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val manager = BenchmarkManager(scope, runStore, settings)
+    val monitor = MonitorService(scope, settings, manager, config.dataDir)
     val mock = if (config.mockEnabled) MockVllmState(config.mockSpeed) else null
 
-    monitor.subscribe(io.ktor.server.application.ApplicationStopping) { scope.cancel() }
+    this.monitor.subscribe(io.ktor.server.application.ApplicationStopping) { scope.cancel() }
 
     install(ContentNegotiation) { json(AppJson) }
     install(CallLogging) {
@@ -57,7 +58,7 @@ fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
     }
 
     routing {
-        apiRoutes(config, settings, manager)
+        apiRoutes(config, settings, manager, monitor)
         if (mock != null) mockVllmRoutes(mock)
         staticRoutes()
     }

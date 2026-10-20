@@ -6,6 +6,11 @@ It is built for closed networks. The UI is plain HTML, CSS and JavaScript served
 
 ## Features
 
+- **Dashboard**: average tokens/sec and response time per model, over a window you pick (1 hour to all time):
+  - per-model cards with average decode speed, a sparkline, average and p95 response time, average time to first token, and success rate
+  - time-series charts of speed, response time and TTFT for every model
+  - **background probes**: one small uncached request per selected model on a schedule (default every 60 s), so you get a continuous trend without running a benchmark. Probes pause automatically while a benchmark is running so they do not skew it. Probe samples are persisted under `DATA_DIR`.
+  - benchmark history is folded in as well (the lowest-concurrency stage of each run, which is closest to what one developer experiences)
 - **Connection**: base URL, optional API key, optional "skip TLS verification" for self-signed certificates. Lists models with their max context length. Shows live vLLM state from `/metrics` (running and waiting requests, KV cache usage, prefix-cache hit rate).
 - **Compatibility checks** for what Claude Code relies on:
   - `GET /v1/models` and the model's `max_model_len`
@@ -76,6 +81,10 @@ The integration tests start a real embedded server with the mock vLLM and exerci
 | `GET/PUT /api/settings` | Read or update the connection settings (the API key is write-only) |
 | `GET /api/models` | Models served by the configured vLLM |
 | `GET /api/server-metrics` | Snapshot of vLLM's Prometheus metrics |
+| `GET /api/dashboard?minutes=1440` | Per-model averages from probes and benchmark runs (`minutes=0` for all time) |
+| `GET/PUT /api/monitor` | Read or change the background probe schedule, models and workload |
+| `POST /api/monitor/probe` | Run one probe round now |
+| `GET/DELETE /api/monitor/samples` | Raw probe samples (`?minutes=&model=`), or clear them |
 | `POST /api/checks` | Run compatibility checks for `{ "model": "..." }` |
 | `POST /api/runs` | Start a benchmark (one at a time) |
 | `GET /api/runs`, `GET /api/runs/{id}` | List runs, or poll one run |
