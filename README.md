@@ -31,6 +31,34 @@ It is built for closed networks. The UI is plain HTML, CSS and JavaScript served
 
 Prompt sizes are in tokens. Before each run the app sends two tiny calibration requests and uses the server's own `usage.prompt_tokens` to work out tokens per word for that model's tokenizer. Every request gets a unique run nonce, so earlier runs never pollute the prefix cache. The token counts shown in results always come from the server's usage block.
 
+## Screenshots
+
+**Dashboard**: average speed and response time per model, with probe trends.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+**Benchmark results**: throughput and latency across a concurrency sweep, with cold vs cached time to first token.
+
+![Benchmark results](docs/screenshots/benchmark-results.png)
+
+**Compatibility checks** for Claude Code:
+
+![Compatibility checks](docs/screenshots/compatibility.png)
+
+**Connection** and **history comparison**:
+
+![Connection](docs/screenshots/connection.png)
+
+![History comparison](docs/screenshots/history-compare.png)
+
+## Technologies
+
+Kotlin 2.3 on JDK 21, Ktor 3.6 (Netty server, CIO client), kotlinx.coroutines, kotlinx.serialization, Logback, Gradle 9 (Kotlin DSL), and a dependency-free HTML/CSS/JS frontend with inline SVG charts. State is stored as plain JSON files. Packaged as a single fat JAR or a Docker image.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full technology table, the system topology, the source dependency map, and sequence diagrams of how a benchmark and the dashboard work.
+
+![System topology](docs/topology.png)
+
 ## Run it
 
 Requires JDK 21. Gradle is bundled through the wrapper.
@@ -51,6 +79,31 @@ To try it without a vLLM server:
 ```bash
 MOCK_ENABLED=true ./gradlew run
 ```
+
+### Docker
+
+```bash
+docker build -t llm-checker .
+docker run -d --name llm-checker -p 18642:18642 -v llm-checker-data:/data \
+  -e VLLM_BASE_URL=http://your-vllm-host:8000 llm-checker
+```
+
+Or with compose (`VLLM_BASE_URL`, `VLLM_API_KEY` and `MOCK_ENABLED` are read from your shell or a `.env` file):
+
+```bash
+VLLM_BASE_URL=http://your-vllm-host:8000 docker compose up -d
+```
+
+The image is a two-stage build (Gradle and JDK 21 to compile, a slim JRE 21 to run), runs as a non-root user, keeps settings, history and probe data in the `/data` volume, and has a health check on `/api/health`.
+
+For a closed network, build the image on a machine with internet access and carry it across:
+
+```bash
+docker save llm-checker | gzip > llm-checker.tar.gz     # online machine
+gunzip -c llm-checker.tar.gz | docker load              # closed network
+```
+
+When vLLM runs on the Docker host itself, `localhost` inside the container is the container. Use the host's address instead, or on Linux add `--add-host=host.docker.internal:host-gateway` and use `http://host.docker.internal:8000`.
 
 ### Configuration (environment variables)
 

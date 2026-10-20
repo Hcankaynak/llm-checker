@@ -1,0 +1,17 @@
+services:
+  llm-checker:
+    build: .
+    image: llm-checker:latest
+    ports:
+      - "18642:18642"
+    environment:
+      # Initial endpoint; it can also be set later in the web UI.
+      VLLM_BASE_URL: "${VLLM_BASE_URL:-}"
+      VLLM_API_KEY: "${VLLM_API_KEY:-}"
+      MOCK_ENABLED: "${MOCK_ENABLED:-false}"
+    volumes:
+      - llm-checker-data:/data
+    restart: unless-stopped
+
+volumes:
+  llm-checker-data:

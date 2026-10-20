@@ -399,7 +399,7 @@ function stageTable(stages) {
 
 /* ---------- charts (inline SVG, no dependencies) ---------- */
 function lineChart(xs, series, unit) {
-  const W = 520, H = 250, m = { l: 54, r: 14, t: 14, b: 34 };
+  const W = 520, H = 250, m = { l: 54, r: 14, t: 24, b: 34 };
   const all = series.flatMap((s) => s.values).filter((v) => v != null && isFinite(v));
   if (!all.length) return '<p class="muted">No data</p>';
   const rawMax = Math.max(...all) * 1.1 || 1;
@@ -414,7 +414,7 @@ function lineChart(xs, series, unit) {
   }
   xs.forEach((v, i) => { g += `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" fill="#8b98a8" font-size="11">${v}</text>`; });
   g += `<text x="${m.l + iw / 2}" y="${H - 0}" text-anchor="middle" fill="#8b98a8" font-size="10.5">concurrent requests</text>`;
-  g += `<text x="12" y="${m.t + 4}" fill="#8b98a8" font-size="10.5">${esc(unit)}</text>`;
+  g += `<text x="${m.l}" y="11" fill="#8b98a8" font-size="10.5">${esc(unit)}</text>`;
   series.forEach((s) => {
     const pts = s.values.map((v, i) => (v == null || !isFinite(v) ? null : [x(i), y(v)]));
     const path = pts.filter(Boolean).map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
@@ -594,7 +594,7 @@ function renderDashCharts(models) {
 }
 
 function timeChart(series, unit) {
-  const W = 520, H = 230, m = { l: 54, r: 14, t: 14, b: 30 };
+  const W = 520, H = 230, m = { l: 54, r: 14, t: 24, b: 30 };
   const all = series.flatMap((s) => s.points);
   if (!all.length) return '<p class="muted">No data</p>';
   const t0 = Math.min(...all.map((p) => p[0])), t1 = Math.max(...all.map((p) => p[0]));
@@ -612,7 +612,7 @@ function timeChart(series, unit) {
     const label = spanH > 36 ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     g += `<text x="${x(t)}" y="${H - 8}" text-anchor="${i === 0 ? "start" : i === 3 ? "end" : "middle"}" fill="#8b98a8" font-size="11">${label}</text>`;
   }
-  g += `<text x="12" y="${m.t + 4}" fill="#8b98a8" font-size="10.5">${esc(unit)}</text>`;
+  g += `<text x="${m.l}" y="11" fill="#8b98a8" font-size="10.5">${esc(unit)}</text>`;
   series.forEach((s) => {
     const path = s.points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
     g += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
