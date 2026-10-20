@@ -28,8 +28,8 @@
       <div class="card">
         <div class="card-head">
           <div>
-            <h2>Model performance</h2>
-            <p class="muted" style="margin:0">Average speed and response time per model, from background probes and your benchmark history.</p>
+            <h2>Models</h2>
+            <p class="muted" style="margin:0">Current speed and response time. The fastest model is listed first. Click a row for details.</p>
           </div>
           <div class="row" style="margin:0">
             <label class="inline">Window
@@ -41,19 +41,18 @@
                 <option value="0">All time</option>
               </select>
             </label>
+            <button class="primary small" id="probeNow">Probe now</button>
             <button class="ghost small" id="dashRefresh">Refresh</button>
           </div>
         </div>
-        <div id="dashKpis" class="kpis"></div>
+        <div id="modelTable" class="muted">Loading models...</div>
+        <div id="monMsg" class="msg"></div>
       </div>
 
-      <div id="dashModels" class="model-cards"></div>
-      <div id="dashCharts" class="charts" style="margin-bottom:16px"></div>
-
-      <div class="grid two">
-        <form class="card" id="monitorForm">
-          <h2>Background probes</h2>
-          <p class="muted">Sends one small, uncached request to each selected model on a schedule so you get a continuous speed and latency trend. Probes pause automatically while a benchmark runs.</p>
+      <details class="card" id="monitorDetails">
+        <summary>Probe settings</summary>
+        <form id="monitorForm">
+          <p class="muted">Sends one small request to each selected model on a schedule, so the table stays current. Probes pause while a benchmark runs.</p>
           <label class="check"><input id="monEnabled" type="checkbox"> Run probes automatically</label>
           <div class="row two-col">
             <label>Every (seconds) <input id="monInterval" type="number" min="5" max="86400" value="60"></label>
@@ -69,16 +68,10 @@
           <div id="monModels" class="checks muted">Connect to a server to choose models.</div>
           <div class="row">
             <button class="primary" type="submit">Save</button>
-            <button type="button" id="probeNow">Probe now</button>
             <button type="button" class="ghost danger" id="clearSamples">Clear probe data</button>
           </div>
-          <div id="monMsg" class="msg"></div>
         </form>
-        <div class="card">
-          <h2>Recent probes</h2>
-          <div id="recentProbes" class="muted">No probes yet.</div>
-        </div>
-      </div>
+      </details>
     </section>
 
     <section id="tab-connection" class="tab">

@@ -499,9 +499,7 @@ $("compareBtn").addEventListener("click", async () => {
 });
 
 /* ---------- dashboard ---------- */
-const PALETTE = ["#4f9cf9", "#3fb950", "#f0883e", "#a78bfa", "#f778ba", "#39c5cf", "#d29922", "#ff7b72"];
-const dash = { monitor: null, samples: [], data: null };
-const colorFor = (model, models) => PALETTE[Math.max(0, models.indexOf(model)) % PALETTE.length];
+const dash = { monitor: null, samples: [], data: null, open: null };
 
 async function loadDashboard() {
   const minutes = $("dashWindow").value;
@@ -514,7 +512,8 @@ async function loadDashboard() {
     dash.data = data; dash.samples = samples; dash.monitor = monitor;
     renderDashboard();
   } catch (err) {
-    $("dashKpis").innerHTML = `<p class="errors">${esc(err.message)}</p>`;
+    $("modelTable").className = "errors";
+    $("modelTable").textContent = err.message;
   }
 }
 
@@ -524,113 +523,110 @@ function ago(ts) {
   return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 }
 
-function renderDashboard() {
-  const { data, samples } = dash;
-  const models = data.models.map((m) => m.model);
-  const ok = samples.filter((s) => s.ok);
-  const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
-  const tps = mean(ok.map((s) => s.decodeTps).filter((v) => v != null));
-  const resp = mean(ok.map((s) => s.totalMs));
-  const ttft = mean(ok.map((s) => s.ttftMs).filter((v) => v != null));
+const speedOf = (m) => m.probe?.avgTps ?? m.bench?.avgTps ?? null;
+const responseOf = (m) => m.probe?.avgResponseMs ?? m.bench?.avgResponseMs ?? null;
 
-  const kp = [];
-  kp.push(kpi("Average speed", fmt.n(tps, 1), "tok/s", ok.length ? `decode speed per request, ${ok.length} probes` : "no probe data yet"));
-  kp.push(kpi("Average response time", fmt.ms(resp), "", ok.length ? `full reply, ${dash.monitor?.config.outputTokens ?? 64} output tokens` : "no probe data yet"));
-  kp.push(kpi("Average time to first token", fmt.ms(ttft), "", "how long before streaming starts"));
-  kp.push(kpi("Probe success rate", samples.length ? fmt.pct(ok.length / samples.length) : "-", "", `${samples.length - ok.length} failed of ${samples.length}`));
-  kp.push(kpi("Benchmark runs", String(data.totalBenchRuns), "", "in this window"));
-  $("dashKpis").innerHTML = kp.join("");
-
-  if (!models.length) {
-    $("dashModels").innerHTML = `<div class="card empty" style="grid-column:1/-1"><h3>No data in this window</h3><p class="muted">Turn on background probes below, press <strong>Probe now</strong>, or run a benchmark. Averages appear here as soon as there is data.</p></div>`;
-  } else {
-    $("dashModels").innerHTML = data.models.map((m) => modelCard(m, models)).join("");
+function modelRows() {
+  const byName = new Map((dash.data?.models || []).map((m) => [m.model, m]));
+  for (const m of state.models) {
+    if (!byName.has(m.id)) byName.set(m.id, { model: m.id, probe: null, bench: null });
   }
-  renderDashCharts(models);
-  renderMonitorPanel();
-  renderRecentProbes(models);
+  return [...byName.values()].sort((a, b) => {
+    const sa = speedOf(a), sb = speedOf(b);
+    if (sa == null && sb == null) return a.model.localeCompare(b.model);
+    if (sa == null) return 1;
+    if (sb == null) return -1;
+    return sb - sa;
+  });
 }
 
-function modelCard(m, models) {
-  const color = colorFor(m.model, models);
-  const p = m.probe, b = m.bench;
-  const headTps = p?.avgTps ?? b?.avgTps;
-  const source = p?.avgTps != null ? `avg of ${p.samples - p.failures} probes` : b?.avgTps != null ? `avg of ${b.requests} benchmark requests` : "no successful requests";
-  const spark = sparkline(dash.samples.filter((s) => s.model === m.model && s.ok && s.decodeTps != null).map((s) => s.decodeTps), color);
-  const statusBadge = p?.lastError ? `<span class="badge fail" title="${esc(p.lastError)}">last probe failed</span>` : "";
-  const mini = p ? `<div class="mini">
-      <div><div class="k">Avg response</div><div class="v">${fmt.ms(p.avgResponseMs)}</div></div>
-      <div><div class="k">p95 response</div><div class="v">${fmt.ms(p.p95ResponseMs)}</div></div>
-      <div><div class="k">Avg TTFT</div><div class="v">${fmt.ms(p.avgTtftMs)}</div></div>
-      <div><div class="k">Last speed</div><div class="v">${p.lastTps != null ? fmt.n(p.lastTps, 1) + " tok/s" : "-"}</div></div>
-      <div><div class="k">Success</div><div class="v">${fmt.pct(p.successRate)}</div></div>
-      <div><div class="k">Last probe</div><div class="v">${ago(p.lastAt)}</div></div></div>` : `<p class="muted" style="margin:0">No probes for this model in the window.</p>`;
-  const bench = b ? `<div class="bench-line">Benchmarks (${b.runs} run${b.runs === 1 ? "" : "s"}, lowest concurrency): <b>${fmt.n(b.avgTps, 1)} tok/s</b>, TTFT <b>${fmt.ms(b.avgTtftMs)}</b>, response <b>${fmt.ms(b.avgResponseMs)}</b>${b.peakOutputTps != null ? `, peak aggregate <b>${fmt.n(b.peakOutputTps, 0)} tok/s</b>` : ""}</div>` : "";
-  return `<div class="model-card" style="border-top-color:${color}">
-    <h3><span class="swatch" style="background:${color}"></span>${esc(m.model)} ${statusBadge}</h3>
-    <div class="big"><div><div class="value">${fmt.n(headTps, 1)}<small>tok/s</small></div><div class="cap">average decode speed \u00b7 ${esc(source)}</div></div>${spark}</div>
-    ${mini}${bench}</div>`;
+function statusBadge(m) {
+  const p = m.probe;
+  if (!p && !m.bench) return '<span class="muted">no data</span>';
+  if (p && p.failures === p.samples) return `<span class="badge fail" title="${esc(p.lastError || "")}">down</span>`;
+  if (p?.lastError) return `<span class="badge warn" title="${esc(p.lastError)}">degraded</span>`;
+  if (p) return '<span class="badge pass">ok</span>';
+  return '<span class="badge skip">from benchmarks</span>';
 }
+
+function switchAdvice(row, rows) {
+  const tps = speedOf(row);
+  const ranked = rows.filter((r) => speedOf(r) != null);
+  if (tps == null) return "No measurements yet. Press Probe now to see how this model is doing right now.";
+  const best = ranked[0];
+  if (ranked.length < 2) return "This is the only model with data. Probe the others to see whether a faster one is available.";
+  if (best.model === row.model) {
+    const next = ranked[1];
+    const pct = ((tps - speedOf(next)) / speedOf(next)) * 100;
+    if (pct < 5) return `Tied with ${next.model}. Either model is fine.`;
+    return `Fastest model right now, about ${fmt.n(pct, 0)}% quicker than ${next.model}. No reason to switch.`;
+  }
+  const pct = ((speedOf(best) - tps) / tps) * 100;
+  if (pct < 5) return `About the same speed as ${best.model}, the current fastest. Switching would not change much.`;
+  const saved = responseOf(row) != null && responseOf(best) != null ? responseOf(row) - responseOf(best) : null;
+  const sooner = saved != null && saved > 50 ? ` Replies arrive about ${fmt.ms(saved)} sooner.` : "";
+  return `${best.model} is about ${fmt.n(pct, 0)}% faster at ${fmt.n(speedOf(best), 1)} tok/s.${sooner} Worth switching if the quality is acceptable.`;
+}
+
+function renderDashboard() {
+  const rows = modelRows();
+  const box = $("modelTable");
+  renderMonitorPanel();
+  if (!rows.length) {
+    box.className = "muted";
+    box.textContent = "No models yet. Connect to a vLLM server on the Connection tab, then probe.";
+    return;
+  }
+  if (dash.open && !rows.some((r) => r.model === dash.open)) dash.open = null;
+  const ranked = rows.filter((r) => speedOf(r) != null);
+  const lead = ranked.length > 1 ? (speedOf(ranked[0]) - speedOf(ranked[1])) / speedOf(ranked[1]) : 1;
+  const fastest = ranked.length && lead >= 0.05 ? ranked[0].model : null;
+  box.className = "";
+  box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+      <th class="left">Model</th><th>Token/s</th><th>Response time</th><th>Status</th>
+    </tr></thead><tbody>${rows.map((m) => modelRowsHtml(m, m.model === fastest, rows)).join("")}</tbody></table></div>`;
+}
+
+function modelRowsHtml(m, fastest, rows) {
+  const open = dash.open === m.model;
+  const main = `<tr class="model-row${open ? " open" : ""}" data-model="${esc(m.model)}">
+      <td class="left"><strong>${esc(m.model)}</strong>${fastest ? ' <span class="badge pass tag">fastest</span>' : ""}</td>
+      <td class="num">${fmt.n(speedOf(m), 1)}</td>
+      <td class="num">${fmt.ms(responseOf(m))}</td>
+      <td>${statusBadge(m)}</td></tr>`;
+  if (!open) return main;
+  const p = m.probe, b = m.bench;
+  const recent = dash.samples.filter((s) => s.model === m.model).slice(-8).reverse();
+  const recentHtml = recent.length ? `<div class="table-wrap" style="margin-top:12px"><table><thead><tr>
+      <th class="left">When</th><th>tok/s</th><th>Response</th><th>TTFT</th><th>Result</th></tr></thead><tbody>${recent.map((s) => `<tr>
+      <td class="left">${ago(s.ts)}</td><td class="num">${fmt.n(s.decodeTps, 1)}</td><td class="num">${fmt.ms(s.totalMs)}</td><td class="num">${fmt.ms(s.ttftMs)}</td>
+      <td>${s.ok ? '<span class="badge pass">ok</span>' : `<span class="badge fail" title="${esc(s.error)}">failed</span>`}</td></tr>`).join("")}</tbody></table></div>` : "";
+  const bench = b ? `<p class="bench-line">From ${b.runs} benchmark run${b.runs === 1 ? "" : "s"} (single user): <b>${fmt.n(b.avgTps, 1)} tok/s</b>, response <b>${fmt.ms(b.avgResponseMs)}</b>, first token <b>${fmt.ms(b.avgTtftMs)}</b>.</p>` : "";
+  return main + `<tr class="detail-row"><td colspan="4"><div class="detail-head"><p class="advice">${esc(switchAdvice(m, rows))}</p>
+      ${sparkline(dash.samples.filter((s) => s.model === m.model && s.ok && s.decodeTps != null).map((s) => s.decodeTps), "#4f9cf9")}</div>
+      <div class="mini">
+        <div><div class="k">Avg time to first token</div><div class="v">${fmt.ms(p?.avgTtftMs ?? b?.avgTtftMs)}</div></div>
+        <div><div class="k">p95 response</div><div class="v">${fmt.ms(p?.p95ResponseMs)}</div></div>
+        <div><div class="k">Last speed</div><div class="v">${p?.lastTps != null ? fmt.n(p.lastTps, 1) + " tok/s" : "-"}</div></div>
+        <div><div class="k">Success rate</div><div class="v">${p ? fmt.pct(p.successRate) : "-"}</div></div>
+        <div><div class="k">Samples</div><div class="v">${p ? p.samples - p.failures + " ok / " + p.failures + " failed" : "-"}</div></div>
+        <div><div class="k">Last probe</div><div class="v">${p ? ago(p.lastAt) : "-"}</div></div>
+      </div>${bench}${recentHtml}</td></tr>`;
+}
+
+$("modelTable").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr.model-row");
+  if (!tr) return;
+  dash.open = dash.open === tr.dataset.model ? null : tr.dataset.model;
+  renderDashboard();
+});
 
 function sparkline(values, color) {
-  if (values.length < 2) return '<svg class="spark"></svg>';
+  if (values.length < 2) return "";
   const v = values.slice(-40);
-  const min = Math.min(...v), max = Math.max(...v), span = max - min || 1;
-  const pts = v.map((y, i) => `${((i / (v.length - 1)) * 148 + 1).toFixed(1)},${(40 - ((y - min) / span) * 36 - 2).toFixed(1)}`).join(" ");
-  return `<svg class="spark" viewBox="0 0 150 42" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
-}
-
-function renderDashCharts(models) {
-  const ok = dash.samples.filter((s) => s.ok);
-  if (ok.length < 2) { $("dashCharts").innerHTML = ""; return; }
-  const build = (title, key, unit) => {
-    const series = models.map((m) => ({
-      name: m, color: colorFor(m, models),
-      points: ok.filter((s) => s.model === m && s[key] != null).map((s) => [s.ts, s[key]]),
-    })).filter((s) => s.points.length);
-    return `<div class="card chart"><h3>${title}</h3>${timeChart(series, unit)}</div>`;
-  };
-  $("dashCharts").innerHTML = build("Decode speed over time", "decodeTps", "tok/s") + build("Response time over time", "totalMs", "ms") + build("Time to first token over time", "ttftMs", "ms");
-}
-
-function timeChart(series, unit) {
-  const W = 520, H = 230, m = { l: 54, r: 14, t: 24, b: 30 };
-  const all = series.flatMap((s) => s.points);
-  if (!all.length) return '<p class="muted">No data</p>';
-  const t0 = Math.min(...all.map((p) => p[0])), t1 = Math.max(...all.map((p) => p[0]));
-  const rawMax = Math.max(...all.map((p) => p[1])) * 1.1 || 1;
-  const step = niceStep(rawMax / 4), max = Math.ceil(rawMax / step) * step;
-  const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const x = (t) => m.l + (t1 === t0 ? iw / 2 : ((t - t0) / (t1 - t0)) * iw);
-  const y = (v) => m.t + ih - (v / max) * ih;
-  let g = "";
-  for (let v = 0; v <= max + 1e-9; v += step) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="#2a3441"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end" fill="#8b98a8" font-size="11">${fmtAxis(v)}</text>`;
-  const spanH = (t1 - t0) / 3600000;
-  for (let i = 0; i < 4; i++) {
-    const t = t0 + ((t1 - t0) * i) / 3;
-    const d = new Date(t);
-    const label = spanH > 36 ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    g += `<text x="${x(t)}" y="${H - 8}" text-anchor="${i === 0 ? "start" : i === 3 ? "end" : "middle"}" fill="#8b98a8" font-size="11">${label}</text>`;
-  }
-  g += `<text x="${m.l}" y="11" fill="#8b98a8" font-size="10.5">${esc(unit)}</text>`;
-  series.forEach((s) => {
-    const path = s.points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
-    g += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
-    if (s.points.length <= 60) s.points.forEach((p) => { g += `<circle cx="${x(p[0]).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="2.8" fill="${s.color}"><title>${esc(s.name)} ${new Date(p[0]).toLocaleTimeString()}: ${fmtAxis(p[1])} ${esc(unit)}</title></circle>`; });
-  });
-  const legend = series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" role="img">${g}</svg><div class="legend">${legend}</div>`;
-}
-
-function renderRecentProbes(models) {
-  const rows = dash.samples.slice(-12).reverse();
-  if (!rows.length) { $("recentProbes").className = "muted"; $("recentProbes").textContent = "No probes yet."; return; }
-  $("recentProbes").className = "";
-  $("recentProbes").innerHTML = `<div class="table-wrap"><table><thead><tr><th class="left">When</th><th class="left">Model</th><th>tok/s</th><th>TTFT</th><th>Response</th><th>Result</th></tr></thead><tbody>${rows.map((s) => `<tr>
-    <td class="left">${ago(s.ts)}</td>
-    <td class="left"><span class="swatch" style="background:${colorFor(s.model, models)}"></span> ${esc(s.model)}</td>
-    <td class="num">${fmt.n(s.decodeTps, 1)}</td><td class="num">${fmt.ms(s.ttftMs)}</td><td class="num">${fmt.ms(s.totalMs)}</td>
-    <td>${s.ok ? '<span class="badge pass">ok</span>' : `<span class="badge fail" title="${esc(s.error)}">failed</span>`}</td></tr>`).join("")}</tbody></table></div>`;
+  const max = Math.max(...v) * 1.15 || 1;
+  const pts = v.map((y, i) => `${((i / (v.length - 1)) * 148 + 1).toFixed(1)},${(40 - (y / max) * 34 - 4).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 150 42"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
 function renderMonitorModels() {
@@ -656,7 +652,7 @@ function renderMonitorPanel() {
   const parts = [];
   if (st.config.enabled) {
     parts.push(st.probing ? "Probing now..." : st.nextRunAt ? `Next probe in ${Math.max(0, Math.round((st.nextRunAt - Date.now()) / 1000))}s` : "Waiting for first probe");
-    parts.push(`last run ${ago(st.lastRunAt)}`);
+    if (st.lastRunAt) parts.push(`last run ${ago(st.lastRunAt)}`);
   } else parts.push("Automatic probes are off");
   if (st.note) parts.push(st.note);
   setMsg("monMsg", parts.join(" \u00b7 "), "");
@@ -679,7 +675,7 @@ $("monitorForm").addEventListener("submit", async (e) => {
 });
 $("probeNow").addEventListener("click", async () => {
   const checked = [...document.querySelectorAll("[data-mon]")].filter((c) => c.checked).map((c) => c.dataset.mon);
-  const models = checked.length ? checked : state.model ? [state.model] : [];
+  const models = checked.length ? checked : state.models.map((m) => m.id);
   $("probeNow").disabled = true;
   setMsg("monMsg", "Probing...", "");
   try {

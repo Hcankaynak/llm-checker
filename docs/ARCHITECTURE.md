@@ -185,7 +185,7 @@ flowchart LR
     Loop -->|"append sample"| JSONL[("monitor-samples.jsonl")]
     Runs[("runs/*.json<br/>benchmark history")] --> Agg
     JSONL --> Agg["computeDashboard()<br/>averages, p50/p95, success rate"]
-    Agg -->|"GET /api/dashboard"| UI["Dashboard tab<br/>cards, sparklines, time-series charts"]
+    Agg -->|"GET /api/dashboard"| UI["Dashboard tab<br/>model table, expandable rows"]
     JSONL -->|"GET /api/monitor/samples"| UI
 ```
 

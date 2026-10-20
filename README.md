@@ -6,10 +6,8 @@ It is built for closed networks. The UI is plain HTML, CSS and JavaScript served
 
 ## Features
 
-- **Dashboard**: average tokens/sec and response time per model, over a window you pick (1 hour to all time):
-  - per-model cards with average decode speed, a sparkline, average and p95 response time, average time to first token, and success rate
-  - time-series charts of speed, response time and TTFT for every model
-  - **background probes**: one small uncached request per selected model on a schedule (default every 60 s), so you get a continuous trend without running a benchmark. Probes pause automatically while a benchmark is running so they do not skew it. Probe samples are persisted under `DATA_DIR`.
+- **Dashboard**: a table of the models on the server, sorted with the fastest first, showing average tokens/sec and response time. Click a row to expand it: time to first token, p95 response time, success rate, the recent probes, and a plain recommendation on whether switching to a faster model is worth it.
+  - **background probes**: one small uncached request per selected model on a schedule (default every 60 s), so the table shows the current situation. Probes pause automatically while a benchmark is running so they do not skew it. Probe samples are persisted under `DATA_DIR`.
   - benchmark history is folded in as well (the lowest-concurrency stage of each run, which is closest to what one developer experiences)
 - **Connection**: base URL, optional API key, optional "skip TLS verification" for self-signed certificates. Lists models with their max context length. Shows live vLLM state from `/metrics` (running and waiting requests, KV cache usage, prefix-cache hit rate).
 - **Compatibility checks** for what Claude Code relies on:
@@ -33,9 +31,13 @@ Prompt sizes are in tokens. Before each run the app sends two tiny calibration r
 
 ## Screenshots
 
-**Dashboard**: average speed and response time per model, with probe trends.
+**Dashboard**: models in a table, fastest first. Click a row for the detail and a switch recommendation.
 
 ![Dashboard](docs/screenshots/dashboard.png)
+
+Clicking a model opens the detail: whether it is worth switching, and the recent probes.
+
+![Model detail](docs/screenshots/dashboard-detail.png)
 
 **Benchmark results**: throughput and latency across a concurrency sweep, with cold vs cached time to first token.
 
