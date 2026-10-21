@@ -17,7 +17,7 @@ import java.util.UUID
 @Serializable
 data class MonitorConfig(
     val enabled: Boolean = false,
-    val intervalSec: Int = 60,
+    val intervalSec: Int = 900,
     val models: List<String> = emptyList(),
     val protocol: String = "openai",
     val promptTokens: Int = 256,

@@ -596,22 +596,27 @@ function modelRowsHtml(m, fastest, rows) {
       <td>${statusBadge(m)}</td></tr>`;
   if (!open) return main;
   const p = m.probe, b = m.bench;
-  const recent = dash.samples.filter((s) => s.model === m.model).slice(-8).reverse();
-  const recentHtml = recent.length ? `<div class="table-wrap" style="margin-top:12px"><table><thead><tr>
-      <th class="left">When</th><th>tok/s</th><th>Response</th><th>TTFT</th><th>Result</th></tr></thead><tbody>${recent.map((s) => `<tr>
-      <td class="left">${ago(s.ts)}</td><td class="num">${fmt.n(s.decodeTps, 1)}</td><td class="num">${fmt.ms(s.totalMs)}</td><td class="num">${fmt.ms(s.ttftMs)}</td>
-      <td>${s.ok ? '<span class="badge pass">ok</span>' : `<span class="badge fail" title="${esc(s.error)}">failed</span>`}</td></tr>`).join("")}</tbody></table></div>` : "";
-  const bench = b ? `<p class="bench-line">From ${b.runs} benchmark run${b.runs === 1 ? "" : "s"} (single user): <b>${fmt.n(b.avgTps, 1)} tok/s</b>, response <b>${fmt.ms(b.avgResponseMs)}</b>, first token <b>${fmt.ms(b.avgTtftMs)}</b>.</p>` : "";
-  return main + `<tr class="detail-row"><td colspan="4"><div class="detail-head"><p class="advice">${esc(switchAdvice(m, rows))}</p>
-      ${sparkline(dash.samples.filter((s) => s.model === m.model && s.ok && s.decodeTps != null).map((s) => s.decodeTps), "#4f9cf9")}</div>
-      <div class="mini">
-        <div><div class="k">Avg time to first token</div><div class="v">${fmt.ms(p?.avgTtftMs ?? b?.avgTtftMs)}</div></div>
-        <div><div class="k">p95 response</div><div class="v">${fmt.ms(p?.p95ResponseMs)}</div></div>
-        <div><div class="k">Last speed</div><div class="v">${p?.lastTps != null ? fmt.n(p.lastTps, 1) + " tok/s" : "-"}</div></div>
-        <div><div class="k">Success rate</div><div class="v">${p ? fmt.pct(p.successRate) : "-"}</div></div>
-        <div><div class="k">Samples</div><div class="v">${p ? p.samples - p.failures + " ok / " + p.failures + " failed" : "-"}</div></div>
-        <div><div class="k">Last probe</div><div class="v">${p ? ago(p.lastAt) : "-"}</div></div>
-      </div>${bench}${recentHtml}</td></tr>`;
+  const recent = dash.samples.filter((s) => s.model === m.model).slice(-5).reverse();
+  const averages = p
+    ? `Averages: ${fmt.n(p.avgTps, 1)} tok/s, response ${fmt.ms(p.avgResponseMs)}, first token ${fmt.ms(p.avgTtftMs)}, p95 response ${fmt.ms(p.p95ResponseMs)}, ${fmt.pct(p.successRate)} successful (${p.samples} checks).`
+    : "No probe averages in this window yet.";
+  const recentHtml = recent.length ? `<div class="table-wrap"><table><thead><tr>
+      <th class="left">When</th><th>Prompt tokens</th><th>Output tokens</th><th>Token/s</th><th>First token</th><th>Response time</th><th>Result</th>
+    </tr></thead><tbody>${recent.map((s) => `<tr>
+      <td class="left">${ago(s.ts)}</td>
+      <td class="num">${s.promptTokens ?? "-"}</td>
+      <td class="num">${s.completionTokens ?? "-"}</td>
+      <td class="num">${fmt.n(s.decodeTps, 1)}</td>
+      <td class="num">${fmt.ms(s.ttftMs)}</td>
+      <td class="num">${fmt.ms(s.totalMs)}</td>
+      <td>${s.ok ? '<span class="badge pass">ok</span>' : `<span class="badge fail" title="${esc(s.error)}">failed</span>`}</td>
+    </tr>`).join("")}</tbody></table></div>` : `<p class="muted">No checks yet for this model.</p>`;
+  const bench = b ? `<p class="bench-line">Benchmarks (${b.runs} run${b.runs === 1 ? "" : "s"}, single user): <b>${fmt.n(b.avgTps, 1)} tok/s</b>, response <b>${fmt.ms(b.avgResponseMs)}</b>, first token <b>${fmt.ms(b.avgTtftMs)}</b>.</p>` : "";
+  return main + `<tr class="detail-row"><td colspan="4">
+      <p class="advice">${esc(switchAdvice(m, rows))}</p>
+      <p class="muted" style="margin:0 0 10px">${esc(averages)}</p>
+      <h3>Last ${recent.length} request${recent.length === 1 ? "" : "s"}</h3>
+      ${recentHtml}${bench}</td></tr>`;
 }
 
 $("modelTable").addEventListener("click", (e) => {
@@ -621,12 +626,17 @@ $("modelTable").addEventListener("click", (e) => {
   renderDashboard();
 });
 
-function sparkline(values, color) {
-  if (values.length < 2) return "";
-  const v = values.slice(-40);
-  const max = Math.max(...v) * 1.15 || 1;
-  const pts = v.map((y, i) => `${((i / (v.length - 1)) * 148 + 1).toFixed(1)},${(40 - (y / max) * 34 - 4).toFixed(1)}`).join(" ");
-  return `<svg class="spark" viewBox="0 0 150 42"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+const INTERVAL_CHOICES = [[300, "5 minutes"], [900, "15 minutes"], [1800, "30 minutes"], [3600, "1 hour"]];
+
+function fillIntervalSelect(current) {
+  const choices = INTERVAL_CHOICES.slice();
+  if (current && !choices.some(([sec]) => sec === current)) {
+    const label = current < 120 ? `${current} seconds` : `${Math.round(current / 60)} minutes`;
+    choices.unshift([current, label]);
+  }
+  $("monInterval").innerHTML = choices.map(([sec, label]) =>
+    `<option value="${sec}">${label}${sec === 900 ? " (recommended)" : ""}</option>`).join("");
+  $("monInterval").value = String(current || 900);
 }
 
 function renderMonitorModels() {
@@ -643,7 +653,7 @@ function renderMonitorPanel() {
   if (!st) return;
   if (!monitorFormDirty) {
     $("monEnabled").checked = st.config.enabled;
-    $("monInterval").value = st.config.intervalSec;
+    fillIntervalSelect(st.config.intervalSec);
     $("monProtocol").value = st.config.protocol;
     $("monPrompt").value = st.config.promptTokens;
     $("monOutput").value = st.config.outputTokens;
@@ -651,7 +661,8 @@ function renderMonitorPanel() {
   }
   const parts = [];
   if (st.config.enabled) {
-    parts.push(st.probing ? "Probing now..." : st.nextRunAt ? `Next probe in ${Math.max(0, Math.round((st.nextRunAt - Date.now()) / 1000))}s` : "Waiting for first probe");
+    const wait = st.nextRunAt ? Math.round((st.nextRunAt - Date.now()) / 1000) : null;
+    parts.push(st.probing ? "Probing now..." : wait != null ? `Next check in ${Math.max(0, wait)}s` : st.lastRunAt ? "Next check starting" : "Waiting for the first check");
     if (st.lastRunAt) parts.push(`last run ${ago(st.lastRunAt)}`);
   } else parts.push("Automatic probes are off");
   if (st.note) parts.push(st.note);

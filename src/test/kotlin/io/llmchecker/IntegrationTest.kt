@@ -109,8 +109,13 @@ class IntegrationTest {
         val failure = runCatching { manager.start(slow) }.exceptionOrNull()
         assertTrue(failure is IllegalStateException)
         manager.cancel(first.id)
-        delay(300)
-        assertEquals("cancelled", manager.get(first.id)!!.status)
+        var status = ""
+        repeat(50) {
+            status = manager.get(first.id)!!.status
+            if (status == "cancelled") return@repeat
+            delay(100)
+        }
+        assertEquals("cancelled", status)
     }
 
     @Test
