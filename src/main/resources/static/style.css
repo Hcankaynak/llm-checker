@@ -58,7 +58,8 @@ main { max-width: 1320px; margin: 0 auto; padding: 22px 24px 60px; }
 
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; min-width: 0; }
 .card + .card { margin-top: 0; }
-#tab-checks .card, #tab-history .card, #tab-connection > .card, #tab-dashboard .card { margin-bottom: 16px; }
+main .card { margin-bottom: 16px; }
+.topbar .conn-pill { margin-left: auto; }
 .card.empty { text-align: center; padding: 56px 24px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 .card-head h2 { margin: 0; }

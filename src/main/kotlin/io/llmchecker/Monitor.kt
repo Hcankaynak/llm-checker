@@ -60,8 +60,7 @@ data class MonitorStatus(
 
 class MonitorService(
     private val scope: CoroutineScope,
-    private val settings: SettingsStore,
-    private val manager: BenchmarkManager,
+    private val settings: Settings,
     private val dir: Path,
     private val maxSamples: Int = 5000,
 ) {
@@ -134,7 +133,7 @@ class MonitorService(
             while (true) {
                 val cfg = config
                 try {
-                    probeAll(cfg, scheduled = true)
+                    probeAll(cfg)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -149,19 +148,14 @@ class MonitorService(
     suspend fun probeNow(models: List<String>? = null): List<MonitorSample> {
         val cfg = config.let { if (models.isNullOrEmpty()) it else it.copy(models = models) }
         require(cfg.models.isNotEmpty()) { "Select at least one model to probe" }
-        return probeAll(cfg, scheduled = false)
+        return probeAll(cfg)
     }
 
-    private suspend fun probeAll(cfg: MonitorConfig, scheduled: Boolean): List<MonitorSample> {
-        if (manager.isBusy()) {
-            if (!scheduled) throw IllegalStateException("A benchmark is running. Probes are paused so they do not skew its results.")
-            note = "Skipped a probe round because a benchmark was running"
-            return emptyList()
-        }
+    private suspend fun probeAll(cfg: MonitorConfig): List<MonitorSample> {
         if (!probeLock.tryLock()) throw IllegalStateException("A probe is already in progress")
         try {
             val out = mutableListOf<MonitorSample>()
-            val client = VllmClient(settings.get())
+            val client = VllmClient(settings)
             client.use {
                 for (model in cfg.models) {
                     val sample = probe(it, cfg, model)

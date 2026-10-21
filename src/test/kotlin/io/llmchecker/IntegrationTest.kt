@@ -4,7 +4,6 @@ import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.net.ServerSocket
 import java.nio.file.Files
@@ -24,7 +23,7 @@ class IntegrationTest {
     fun start() {
         port = ServerSocket(0).use { it.localPort }
         val config = AppConfig(host = "127.0.0.1", port = port, dataDir = Files.createTempDirectory("llmchecker"), mockEnabled = true, mockSpeed = 30.0)
-        settings = Settings(baseUrl = config.mockBaseUrl)
+        settings = config.connection()
         server = embeddedServer(Netty, port = port, host = "127.0.0.1") { module(config) }.start(wait = false)
     }
 
@@ -67,74 +66,20 @@ class IntegrationTest {
     }
 
     @Test
-    fun compatibilityChecksAllPassAgainstMock() = runBlocking {
-        val results = VllmClient(settings).use { runCompatibilityChecks(it, "mock-model") }
-        val failing = results.filter { it.status != "pass" }
-        assertTrue(failing.isEmpty(), "unexpected: $failing")
-    }
-
-    @Test
-    fun benchmarkRunProducesStagesAndCachingSignal() = runBlocking {
-        val dir = Files.createTempDirectory("runs")
-        val manager = BenchmarkManager(this, RunStore(dir), SettingsStore(dir.resolve("s.json"), settings))
-        val started = manager.start(
-            BenchmarkRequest(
-                model = "mock-model", promptTokens = 3000, sharedPrefixTokens = 2500, outputTokens = 20,
-                concurrencyLevels = listOf(1, 3), requestsPerLevel = 3,
-            ),
-        )
-        var run = manager.get(started.id)!!
-        repeat(200) {
-            if (run.status != "running") return@repeat
-            delay(100)
-            run = manager.get(started.id)!!
-        }
-        assertEquals("completed", run.status, run.error)
-        assertEquals(2, run.stages.size)
-        assertTrue(run.stages.all { it.completed == it.requested && it.failed == 0 })
-        val cold = run.coldProbe!!
-        val warm = run.stages[0].ttft!!.p50
-        assertTrue(cold.ttftMs!! > warm, "cold ${cold.ttftMs} should exceed warm $warm")
-        assertNotNull(run.stages[0].server?.generationTps)
-        assertNotNull(run.summary)
-        assertTrue(runToCsv(run).lines().size > 6)
-    }
-
-    @Test
-    fun rejectsConcurrentRuns() = runBlocking {
-        val dir = Files.createTempDirectory("runs2")
-        val manager = BenchmarkManager(this, RunStore(dir), SettingsStore(dir.resolve("s.json"), settings))
-        val slow = BenchmarkRequest(model = "mock-model", promptTokens = 200, outputTokens = 200, concurrencyLevels = listOf(1), requestsPerLevel = 3)
-        val first = manager.start(slow)
-        val failure = runCatching { manager.start(slow) }.exceptionOrNull()
-        assertTrue(failure is IllegalStateException)
-        manager.cancel(first.id)
-        var status = ""
-        repeat(50) {
-            status = manager.get(first.id)!!.status
-            if (status == "cancelled") return@repeat
-            delay(100)
-        }
-        assertEquals("cancelled", status)
-    }
-
-    @Test
     fun monitorProbesStoreSamplesAndFeedTheDashboard() = runBlocking {
         val dir = Files.createTempDirectory("monitor")
-        val store = SettingsStore(dir.resolve("s.json"), settings)
-        val manager = BenchmarkManager(this, RunStore(dir.resolve("runs")), store)
-        val monitor = MonitorService(this, store, manager, dir)
+        val monitor = MonitorService(this, settings, dir)
         monitor.update(MonitorConfig(enabled = false, models = listOf("mock-model", "mock-coder-32b"), promptTokens = 200, outputTokens = 20))
 
         val taken = monitor.probeNow()
         assertEquals(2, taken.size)
         assertTrue(taken.all { it.ok && it.completionTokens == 20 && it.decodeTps != null })
 
-        val dashboard = computeDashboard(emptyList(), monitor.samples(0, null), 60)
+        val dashboard = computeDashboard(monitor.samples(0, null), 60)
         assertEquals(listOf("mock-coder-32b", "mock-model"), dashboard.models.map { it.model })
         assertTrue(dashboard.models.all { (it.probe?.avgTps ?: 0.0) > 0 })
 
-        val reloaded = MonitorService(this, store, manager, dir)
+        val reloaded = MonitorService(this, settings, dir)
         assertEquals(2, reloaded.samples(0, null).size)
         assertEquals(listOf("mock-model", "mock-coder-32b"), reloaded.status().config.models)
     }

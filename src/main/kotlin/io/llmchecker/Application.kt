@@ -23,15 +23,8 @@ fun main() {
 }
 
 fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
-    val defaultBase = config.defaultBaseUrl.ifBlank { if (config.mockEnabled) config.mockBaseUrl else "" }
-    val settings = SettingsStore(
-        config.dataDir.resolve("settings.json"),
-        Settings(baseUrl = defaultBase, apiKey = config.defaultApiKey),
-    )
-    val runStore = RunStore(config.dataDir.resolve("runs"))
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val manager = BenchmarkManager(scope, runStore, settings)
-    val monitor = MonitorService(scope, settings, manager, config.dataDir)
+    val monitor = MonitorService(scope, config.connection(), config.dataDir)
     val mock = if (config.mockEnabled) MockVllmState(config.mockSpeed) else null
 
     this.monitor.subscribe(io.ktor.server.application.ApplicationStopping) { scope.cancel() }
@@ -39,7 +32,7 @@ fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
     install(ContentNegotiation) { json(AppJson) }
     install(CallLogging) {
         level = Level.INFO
-        filter { it.request.local.uri.startsWith("/api/") && it.request.local.uri != "/api/health" && !it.request.local.uri.startsWith("/api/runs") }
+        filter { it.request.local.uri.startsWith("/api/") && it.request.local.uri != "/api/health" }
     }
     install(StatusPages) {
         exception<IllegalArgumentException> { call, cause ->
@@ -58,7 +51,7 @@ fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
     }
 
     routing {
-        apiRoutes(config, settings, manager, monitor)
+        apiRoutes(config, monitor)
         if (mock != null) mockVllmRoutes(mock)
         staticRoutes()
     }

@@ -11,192 +11,66 @@
     <div class="brand">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 13h3l3-8 4 14 3-6h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>LLM Checker</span>
-      <small>vLLM performance &amp; compatibility</small>
+      <small>model speed</small>
     </div>
-    <nav class="tabs" id="tabs">
-      <button data-tab="dashboard" class="active">Dashboard</button>
-      <button data-tab="connection">Connection</button>
-      <button data-tab="checks">Compatibility</button>
-      <button data-tab="bench">Benchmark</button>
-      <button data-tab="history">History</button>
-    </nav>
-    <div class="conn-pill" id="connPill" title="Connection status"><span class="dot"></span><span id="connText">Not connected</span></div>
+    <div class="conn-pill" id="connPill" title="vLLM server from VLLM_BASE_URL"><span class="dot"></span><span id="connText">Connecting</span></div>
   </header>
 
   <main>
-    <section id="tab-dashboard" class="tab active">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Models</h2>
-            <p class="muted" style="margin:0">Current speed and response time. The fastest model is listed first. Click a row for details.</p>
-          </div>
-          <div class="row" style="margin:0">
-            <label class="inline">Window
-              <select id="dashWindow">
-                <option value="60">Last hour</option>
-                <option value="360">Last 6 hours</option>
-                <option value="1440" selected>Last 24 hours</option>
-                <option value="10080">Last 7 days</option>
-                <option value="0">All time</option>
-              </select>
-            </label>
-            <button class="primary small" id="probeNow">Probe now</button>
-            <button class="ghost small" id="dashRefresh">Refresh</button>
-          </div>
-        </div>
-        <div id="modelTable" class="muted">Loading models...</div>
-        <div id="monMsg" class="msg"></div>
-      </div>
-
-      <details class="card" id="monitorDetails">
-        <summary>Probe settings</summary>
-        <form id="monitorForm">
-          <p class="muted">Each check is a real generation, so 15 minutes is the default: often enough to notice a model slowing down, light enough not to load the GPU. Probes pause while a benchmark runs.</p>
-          <label class="check"><input id="monEnabled" type="checkbox"> Run probes automatically</label>
-          <div class="row two-col">
-            <label>Check every
-              <select id="monInterval">
-                <option value="300">5 minutes</option>
-                <option value="900" selected>15 minutes (recommended)</option>
-                <option value="1800">30 minutes</option>
-                <option value="3600">1 hour</option>
-              </select>
-            </label>
-            <label>Protocol
-              <select id="monProtocol"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select>
-            </label>
-          </div>
-          <div class="row two-col">
-            <label>Prompt tokens <input id="monPrompt" type="number" min="16" max="32000" value="256"></label>
-            <label>Output tokens <input id="monOutput" type="number" min="1" max="2048" value="64"></label>
-          </div>
-          <label>Models to probe</label>
-          <div id="monModels" class="checks muted">Connect to a server to choose models.</div>
-          <div class="row">
-            <button class="primary" type="submit">Save</button>
-            <button type="button" class="ghost danger" id="clearSamples">Clear probe data</button>
-          </div>
-        </form>
-      </details>
-    </section>
-
-    <section id="tab-connection" class="tab">
-      <div class="grid two">
-        <form class="card" id="settingsForm">
-          <h2>vLLM endpoint</h2>
-          <p class="muted">The base URL of your vLLM server, for example <code>http://10.0.0.12:8000</code>. A trailing <code>/v1</code> is fine.</p>
-          <label>Base URL
-            <input id="baseUrl" type="text" placeholder="http://host:8000" autocomplete="off" spellcheck="false">
-          </label>
-          <label>API key <span class="muted" id="keyHint"></span>
-            <input id="apiKey" type="password" placeholder="Leave empty to keep the stored key" autocomplete="off">
-          </label>
-          <div class="row">
-            <label class="check"><input id="skipTls" type="checkbox"> Skip TLS certificate verification</label>
-            <label class="inline">Timeout (s) <input id="timeoutSec" type="number" min="5" max="7200" value="600"></label>
-          </div>
-          <div class="row">
-            <button class="primary" type="submit" id="saveBtn">Save &amp; test</button>
-            <button type="button" id="clearKeyBtn" class="ghost">Remove stored key</button>
-            <button type="button" id="mockBtn" class="ghost hidden">Use built-in mock server</button>
-          </div>
-          <div id="settingsMsg" class="msg"></div>
-        </form>
-
-        <div class="card">
-          <div class="card-head">
-            <h2>Server status</h2>
-            <button class="ghost small" id="refreshMetrics">Refresh</button>
-          </div>
-          <div id="serverStatus" class="muted">Save a connection to see live vLLM metrics.</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
+    <div class="card">
+      <div class="card-head">
+        <div>
           <h2>Models</h2>
-          <button class="ghost small" id="refreshModels">Reload</button>
+          <p class="muted" style="margin:0">Current speed and response time. The fastest model is listed first. Click a row for the last 5 checks.</p>
         </div>
-        <div id="modelsBox" class="muted">No models loaded yet.</div>
+        <div class="row" style="margin:0">
+          <label class="inline">Window
+            <select id="dashWindow">
+              <option value="60">Last hour</option>
+              <option value="360">Last 6 hours</option>
+              <option value="1440" selected>Last 24 hours</option>
+              <option value="10080">Last 7 days</option>
+              <option value="0">All time</option>
+            </select>
+          </label>
+          <button class="primary small" id="probeNow">Probe now</button>
+          <button class="ghost small" id="dashRefresh">Refresh</button>
+        </div>
       </div>
-    </section>
+      <div id="modelTable" class="muted">Loading models...</div>
+      <div id="monMsg" class="msg"></div>
+    </div>
 
-    <section id="tab-checks" class="tab">
-      <div class="card">
-        <h2>Claude Code compatibility</h2>
-        <p class="muted">Sends a handful of tiny requests to verify the features agentic coding tools depend on: streaming with usage, tool calling, the Anthropic Messages API, context length and metrics.</p>
+    <details class="card" id="monitorDetails">
+      <summary>Probe settings</summary>
+      <form id="monitorForm">
+        <p class="muted">Each check is a real generation, so 15 minutes is the default: often enough to notice a model slowing down, light enough not to load the GPU. The vLLM address comes from <code>VLLM_BASE_URL</code>.</p>
+        <label class="check"><input id="monEnabled" type="checkbox"> Run probes automatically</label>
+        <div class="row two-col">
+          <label>Check every
+            <select id="monInterval">
+              <option value="300">5 minutes</option>
+              <option value="900" selected>15 minutes (recommended)</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+            </select>
+          </label>
+          <label>Protocol
+            <select id="monProtocol"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select>
+          </label>
+        </div>
+        <div class="row two-col">
+          <label>Prompt tokens <input id="monPrompt" type="number" min="16" max="32000" value="256"></label>
+          <label>Output tokens <input id="monOutput" type="number" min="1" max="2048" value="64"></label>
+        </div>
+        <label>Models to probe</label>
+        <div id="monModels" class="checks muted">Waiting for the model list.</div>
         <div class="row">
-          <label class="inline">Model <select class="model-select" id="checkModel"></select></label>
-          <button class="primary" id="runChecks">Run checks</button>
+          <button class="primary" type="submit">Save</button>
+          <button type="button" class="ghost danger" id="clearSamples">Clear probe data</button>
         </div>
-        <div id="checksOut"></div>
-      </div>
-    </section>
-
-    <section id="tab-bench" class="tab">
-      <div class="grid bench-grid">
-        <form class="card" id="benchForm">
-          <h2>Benchmark</h2>
-          <label>Preset
-            <select id="preset">
-              <option value="quick">Quick sanity check</option>
-              <option value="claude">Claude Code agent session</option>
-              <option value="stress">Concurrency stress sweep</option>
-              <option value="long">Long context prefill</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <p class="muted" id="presetDesc"></p>
-          <label>Model <select class="model-select" id="benchModel"></select></label>
-          <label>API protocol
-            <select id="protocol">
-              <option value="openai">OpenAI chat completions</option>
-              <option value="anthropic">Anthropic messages</option>
-            </select>
-          </label>
-          <div class="row two-col">
-            <label>Prompt tokens <input id="promptTokens" type="number" min="16" max="400000"></label>
-            <label>Shared prefix tokens <input id="sharedPrefix" type="number" min="0"></label>
-          </div>
-          <div class="row two-col">
-            <label>Output tokens <input id="outputTokens" type="number" min="1" max="65536"></label>
-            <label>Requests per level <input id="requestsPerLevel" type="number" min="1" max="2000"></label>
-          </div>
-          <label>Concurrency levels <input id="levels" type="text" placeholder="1, 2, 4, 8"></label>
-          <div class="row two-col">
-            <label>Warm-up requests <input id="warmup" type="number" min="0" max="20"></label>
-            <label>Label <input id="label" type="text" placeholder="optional, e.g. fp8 + chunked prefill"></label>
-          </div>
-          <label class="check"><input id="ignoreEos" type="checkbox" checked> Force full output length (ignore EOS, OpenAI protocol only)</label>
-          <div class="row">
-            <button class="primary" type="submit" id="startBtn">Start benchmark</button>
-          </div>
-          <div id="benchMsg" class="msg"></div>
-        </form>
-
-        <div id="benchResult" class="stack">
-          <div class="card empty">
-            <h3>No benchmark running</h3>
-            <p class="muted">Pick a preset and start a run. Results appear here live: time to first token, decode speed per request, aggregate throughput and what the server itself reports.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="tab-history" class="tab">
-      <div class="card">
-        <div class="card-head">
-          <h2>Run history</h2>
-          <div class="row">
-            <button class="ghost small" id="compareBtn" disabled>Compare selected</button>
-            <button class="ghost small" id="refreshHistory">Refresh</button>
-          </div>
-        </div>
-        <div id="historyBox" class="muted">Loading...</div>
-      </div>
-      <div id="compareBox"></div>
-    </section>
+      </form>
+    </details>
   </main>
 
   <div id="toast" class="toast hidden"></div>

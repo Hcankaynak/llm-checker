@@ -53,8 +53,6 @@ data class StreamRequest(
 
 data class StreamOutcome(val result: RequestResult, val gapsMs: DoubleArray)
 
-data class RawResponse(val status: Int, val json: JsonElement?, val text: String, val latencyMs: Double)
-
 fun normalizeBaseUrl(input: String): String {
     var url = input.trim().trimEnd('/')
     for (suffix in listOf("/v1/chat/completions", "/v1/messages", "/v1/models", "/v1", "/metrics")) {
@@ -138,31 +136,6 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
         }.orEmpty()
         return models to latency
     }
-
-    suspend fun postJson(path: String, body: JsonObject, anthropic: Boolean = false): RawResponse {
-        val t0 = System.nanoTime()
-        val resp: HttpResponse = http.post {
-            url("$root$path")
-            authHeaders(anthropic)
-            contentType(ContentType.Application.Json)
-            setBody(body.toString())
-        }
-        val text = resp.bodyAsText()
-        val latency = (System.nanoTime() - t0) / 1e6
-        val json = runCatching { AppJson.parseToJsonElement(text) }.getOrNull()
-        return RawResponse(resp.status.value, json, text, latency)
-    }
-
-    suspend fun fetchMetricsText(): String? = try {
-        val resp = http.get { url("$root/metrics"); authHeaders() }
-        if (resp.status.isSuccess()) resp.bodyAsText() else null
-    } catch (e: CancellationException) {
-        throw e
-    } catch (_: Exception) {
-        null
-    }
-
-    suspend fun serverSnapshot(): ServerSnapshot? = fetchMetricsText()?.let(::parseServerSnapshot)
 
     fun chatBody(req: StreamRequest, stream: Boolean): JsonObject = when (req.protocol) {
         "anthropic" -> buildJsonObject {
@@ -317,35 +290,4 @@ fun describe(e: Throwable): String {
     val name = e::class.simpleName ?: "Error"
     val msg = e.message ?: e.cause?.message
     return if (msg.isNullOrBlank()) name else "$name: ${msg.take(300)}"
-}
-
-private val metricLine = Regex("""^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{[^}]*\})?\s+([^\s]+)""")
-
-fun parsePrometheus(text: String): Map<String, Double> {
-    val sums = HashMap<String, Double>()
-    for (line in text.lineSequence()) {
-        if (line.isBlank() || line.startsWith("#")) continue
-        val m = metricLine.find(line) ?: continue
-        val name = m.groupValues[1]
-        if (name.endsWith("_created") || name.endsWith("_bucket")) continue
-        val value = m.groupValues[3].toDoubleOrNull() ?: continue
-        if (!value.isFinite()) continue
-        sums[name] = (sums[name] ?: 0.0) + value
-    }
-    return sums
-}
-
-fun parseServerSnapshot(text: String): ServerSnapshot {
-    val m = parsePrometheus(text)
-    fun first(vararg names: String): Double? = names.firstNotNullOfOrNull { m[it] }
-    return ServerSnapshot(
-        running = first("vllm:num_requests_running"),
-        waiting = first("vllm:num_requests_waiting"),
-        kvCacheUsage = first("vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc"),
-        generationTokensTotal = first("vllm:generation_tokens_total", "vllm:generation_tokens"),
-        promptTokensTotal = first("vllm:prompt_tokens_total", "vllm:prompt_tokens"),
-        prefixCacheHits = first("vllm:prefix_cache_hits_total", "vllm:gpu_prefix_cache_hits_total", "vllm:prefix_cache_hits"),
-        prefixCacheQueries = first("vllm:prefix_cache_queries_total", "vllm:gpu_prefix_cache_queries_total", "vllm:prefix_cache_queries"),
-        preemptionsTotal = first("vllm:num_preemptions_total", "vllm:num_preemptions"),
-    )
 }

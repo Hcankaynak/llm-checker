@@ -5,9 +5,10 @@ services:
     ports:
       - "18642:18642"
     environment:
-      # Initial endpoint; it can also be set later in the web UI.
       VLLM_BASE_URL: "${VLLM_BASE_URL:-}"
       VLLM_API_KEY: "${VLLM_API_KEY:-}"
+      VLLM_SKIP_TLS_VERIFY: "${VLLM_SKIP_TLS_VERIFY:-false}"
+      VLLM_TIMEOUT_SEC: "${VLLM_TIMEOUT_SEC:-600}"
       MOCK_ENABLED: "${MOCK_ENABLED:-false}"
     volumes:
       - llm-checker-data:/data
