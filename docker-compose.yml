@@ -1,7 +1,6 @@
 services:
   llm-checker:
-    build: .
-    image: llm-checker:latest
+    image: ghcr.io/hcankaynak/llm-checker:latest
     ports:
       - "18642:18642"
     environment:
