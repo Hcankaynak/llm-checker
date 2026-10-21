@@ -1,7 +1,7 @@
 name: Publish image
 
 # Pushing a git tag runs this workflow. The image is published only when the
-# tagged commit is on origin/develop. The image tag matches the git tag:
+# tagged commit is on origin/main. The image tag matches the git tag:
 # ghcr.io/<repository>:<git-tag>
 on:
   push:
@@ -24,16 +24,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require the tagged commit to be on develop
+      - name: Require the tagged commit to be on main
         id: gate
         run: |
           set -euo pipefail
-          if ! git fetch --no-tags origin develop; then
-            echo "::error::origin/develop does not exist. Push the develop branch, then tag a commit on it."
+          if ! git fetch --no-tags origin main; then
+            echo "::error::origin/main does not exist. Push main, then tag a commit on it."
             exit 1
           fi
           if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-            echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on origin/develop, so no image was published."
+            echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on origin/main, so no image was published."
             exit 1
           fi
           tag="${GITHUB_REF_NAME}"
