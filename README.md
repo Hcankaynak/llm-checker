@@ -87,6 +87,22 @@ The vLLM connection is environment variables only. Restart the app to change it.
 
 Integration tests start an embedded server with the mock vLLM and cover model listing, streaming, and a probe round.
 
+## Continuous integration
+
+Two GitHub Actions workflows live in `.github/workflows`.
+
+**Build** runs on every push and pull request. It runs `./gradlew build`, so the check is green only when the project compiles and the tests pass.
+
+**Publish image** runs when a git tag is pushed. It publishes only if that tag points at a commit on the `develop` branch. The image goes to GitHub Container Registry with the same tag, for example `ghcr.io/hcankaynak/llm-checker:v1.0.0`.
+
+```bash
+git checkout develop
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+`develop` has to exist on the remote, and the tagged commit has to be in its history. The repository's Actions workflow permissions need to be read and write so the workflow can push the package (Settings → Actions → General → Workflow permissions).
+
 ## HTTP API
 
 | Method and path | Description |
