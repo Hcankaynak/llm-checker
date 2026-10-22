@@ -2,6 +2,7 @@ package io.llmchecker
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
@@ -37,8 +38,14 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.net.Socket
+import java.security.SecureRandom
 import java.security.cert.X509Certificate
-import javax.net.ssl.X509TrustManager
+import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLEngine
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509ExtendedTrustManager
 
 class UpstreamException(message: String, val status: Int? = null) : Exception(message)
 
@@ -64,16 +71,26 @@ fun normalizeBaseUrl(input: String): String {
     return url.trimEnd('/')
 }
 
-private object TrustAllManager : X509TrustManager {
+private object TrustAllManager : X509ExtendedTrustManager() {
     override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
     override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) = Unit
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) = Unit
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) = Unit
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) = Unit
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+}
+
+private fun trustAllContext(): SSLContext = SSLContext.getInstance("TLS").apply {
+    init(null, arrayOf<TrustManager>(TrustAllManager), SecureRandom())
 }
 
 class VllmClient(private val settings: Settings) : AutoCloseable {
     val root: String = normalizeBaseUrl(settings.baseUrl)
 
-    private val http = HttpClient(CIO) {
+    private val http = if (settings.skipTlsVerify && root.startsWith("https://")) trustAllClient() else verifiedClient()
+
+    private fun verifiedClient() = HttpClient(CIO) {
         expectSuccess = false
         engine {
             maxConnectionsCount = 2048
@@ -81,8 +98,27 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
             endpoint.connectTimeout = 10_000
             endpoint.keepAliveTime = 30_000
             endpoint.connectAttempts = 1
-            if (settings.skipTlsVerify) {
-                https { trustManager = TrustAllManager }
+        }
+        install(HttpTimeout) {
+            connectTimeoutMillis = 10_000
+            requestTimeoutMillis = settings.requestTimeoutSec * 1000L
+            socketTimeoutMillis = settings.requestTimeoutSec * 1000L
+        }
+    }
+
+    // CIO verifies the URL host even with a trust-all manager, and it fills a null
+    // server name back in. OkHttp can turn both checks off and still stream the body.
+    private fun trustAllClient() = HttpClient(OkHttp) {
+        expectSuccess = false
+        engine {
+            config {
+                val timeoutSec = settings.requestTimeoutSec.toLong()
+                sslSocketFactory(trustAllContext().socketFactory, TrustAllManager)
+                hostnameVerifier { _, _ -> true }
+                connectTimeout(10, TimeUnit.SECONDS)
+                readTimeout(timeoutSec, TimeUnit.SECONDS)
+                writeTimeout(timeoutSec, TimeUnit.SECONDS)
+                callTimeout(timeoutSec, TimeUnit.SECONDS)
             }
         }
         install(HttpTimeout) {

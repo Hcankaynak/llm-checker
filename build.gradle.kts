@@ -37,6 +37,7 @@ dependencies {
 
     implementation("io.ktor:ktor-client-core")
     implementation("io.ktor:ktor-client-cio")
+    implementation("io.ktor:ktor-client-okhttp")
     implementation("io.ktor:ktor-client-content-negotiation")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
@@ -49,4 +50,5 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs("--add-modules", "jdk.httpserver")
 }

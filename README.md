@@ -73,7 +73,7 @@ The vLLM connection is environment variables only. Restart the app to change it.
 | --- | --- | --- |
 | `VLLM_BASE_URL` | empty | vLLM base URL, for example `http://10.0.0.12:8000`. A trailing `/v1` is fine. |
 | `VLLM_API_KEY` | empty | Bearer token, if the server requires one |
-| `VLLM_SKIP_TLS_VERIFY` | `false` | Accept a self-signed certificate |
+| `VLLM_SKIP_TLS_VERIFY` | `true` | Trust any certificate and hostname on vLLM requests. Set to `false` to verify |
 | `VLLM_TIMEOUT_SEC` | `600` | Request timeout, 5 to 7200 seconds |
 | `PORT` | `18642` | HTTP port |
 | `HOST` | `0.0.0.0` | Bind address |

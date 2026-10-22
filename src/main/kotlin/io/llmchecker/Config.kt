@@ -35,7 +35,7 @@ data class AppConfig(
                 dataDir = Paths.get(env["DATA_DIR"] ?: "data"),
                 baseUrl = env["VLLM_BASE_URL"].orEmpty().trim(),
                 apiKey = env["VLLM_API_KEY"]?.takeIf { it.isNotBlank() },
-                skipTlsVerify = on("VLLM_SKIP_TLS_VERIFY"),
+                skipTlsVerify = env["VLLM_SKIP_TLS_VERIFY"]?.trim()?.lowercase() !in setOf("0", "false", "no", "off"),
                 requestTimeoutSec = env["VLLM_TIMEOUT_SEC"]?.toIntOrNull()?.coerceIn(5, 7200) ?: 600,
                 mockEnabled = on("MOCK_ENABLED"),
                 mockSpeed = env["MOCK_SPEED"]?.toDoubleOrNull()?.takeIf { it > 0 } ?: 1.0,

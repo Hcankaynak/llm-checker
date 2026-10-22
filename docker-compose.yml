@@ -6,7 +6,7 @@ services:
     environment:
       VLLM_BASE_URL: "${VLLM_BASE_URL:-}"
       VLLM_API_KEY: "${VLLM_API_KEY:-}"
-      VLLM_SKIP_TLS_VERIFY: "${VLLM_SKIP_TLS_VERIFY:-false}"
+      VLLM_SKIP_TLS_VERIFY: "${VLLM_SKIP_TLS_VERIFY:-true}"
       VLLM_TIMEOUT_SEC: "${VLLM_TIMEOUT_SEC:-600}"
       MOCK_ENABLED: "${MOCK_ENABLED:-false}"
       ZULIP_SITE: "${ZULIP_SITE:-}"
