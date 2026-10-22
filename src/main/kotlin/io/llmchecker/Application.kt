@@ -25,6 +25,9 @@ fun main() {
 fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val monitor = MonitorService(scope, config.connection(), config.dataDir)
+    val alarms = AlarmService(config.zulip(), config.dataDir, samplesFor = { model -> monitor.samples(0, model, 5000) })
+    monitor.onSample = { alarms.onSample(it) }
+    monitor.onSamplesCleared = { alarms.onSamplesCleared() }
     val mock = if (config.mockEnabled) MockVllmState(config.mockSpeed) else null
 
     this.monitor.subscribe(io.ktor.server.application.ApplicationStopping) { scope.cancel() }
@@ -51,7 +54,7 @@ fun Application.module(config: AppConfig = AppConfig.fromEnv()) {
     }
 
     routing {
-        apiRoutes(config, monitor)
+        apiRoutes(config, monitor, alarms)
         if (mock != null) mockVllmRoutes(mock)
         staticRoutes()
     }

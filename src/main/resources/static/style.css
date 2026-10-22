@@ -172,6 +172,10 @@ tr.detail-row > td { text-align: left; white-space: normal; background: #10161d;
 .mini .v { font-weight: 600; font-variant-numeric: tabular-nums; }
 .bench-line { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12.5px; color: var(--muted); }
 .bench-line b { color: var(--text); font-weight: 600; }
+.alarm-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
+.alarm-row p { margin: 0; }
+.alarm-row .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.alarm-row .actions { display: flex; gap: 8px; align-items: center; flex: none; }
 .checks { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-height: 180px; overflow-y: auto; }
 .checks label { margin: 0; font-weight: 400; display: flex; gap: 8px; align-items: center; }
 .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }

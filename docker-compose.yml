@@ -9,6 +9,9 @@ services:
       VLLM_SKIP_TLS_VERIFY: "${VLLM_SKIP_TLS_VERIFY:-false}"
       VLLM_TIMEOUT_SEC: "${VLLM_TIMEOUT_SEC:-600}"
       MOCK_ENABLED: "${MOCK_ENABLED:-false}"
+      ZULIP_SITE: "${ZULIP_SITE:-}"
+      ZULIP_EMAIL: "${ZULIP_EMAIL:-}"
+      ZULIP_API_KEY: "${ZULIP_API_KEY:-}"
     volumes:
       - llm-checker-data:/data
     restart: unless-stopped

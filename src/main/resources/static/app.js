@@ -271,10 +271,151 @@ $("clearSamples").addEventListener("click", async () => {
 });
 $("dashWindow").addEventListener("change", loadDashboard);
 $("dashRefresh").addEventListener("click", loadDashboard);
-setInterval(() => { if (!document.hidden) loadDashboard(); }, 5000);
+setInterval(() => { if (!document.hidden) { loadDashboard(); loadAlarms(); } }, 5000);
+
+const alarms = { doc: { zulipConfigured: false, alarms: [], states: [] }, busy: false };
+
+function windowName(minutes) {
+  const names = { 0: "all-time average", 60: "1-hour average", 360: "6-hour average", 1440: "24-hour average", 10080: "7-day average" };
+  return names[Number(minutes)] || `${minutes}-minute average`;
+}
+
+function alarmSummary(a) {
+  const who = a.model || "Every model";
+  if (a.metric === "failure") return `${who}: check failed, posts to #${a.channel} / ${a.topic}`;
+  const amount = a.unit === "percent" ? `${a.threshold}%` : a.threshold;
+  const dir = { drop: "drops by", rise: "rises by", change: "changes by" }[a.direction] || a.direction;
+  const metric = { decodeTps: "decode tokens/sec", totalMs: "response time", ttftMs: "time to first token", completionTokens: "output tokens" }[a.metric] || a.metric;
+  const base = a.baseline === "previous" ? "the previous check" : a.baseline === "last5" ? "the last 5 checks" : `the ${windowName(a.windowMinutes)}`;
+  return `${who}: ${metric} ${dir} ${amount} compared with ${base}. Posts to #${a.channel} / ${a.topic}`;
+}
+
+function syncAlarmForm() {
+  const failure = $("alarmMetric").value === "failure";
+  $("alarmCompare").classList.toggle("hidden", failure);
+  $("alarmWindowWrap").classList.toggle("hidden", failure || $("alarmBaseline").value !== "window");
+}
+
+function fillAlarmModels() {
+  const sel = $("alarmModel");
+  if (document.activeElement === sel) return;
+  const current = sel.value;
+  const names = new Set(state.models.map((m) => m.id));
+  for (const a of alarms.doc.alarms || []) if (a.model) names.add(a.model);
+  sel.innerHTML = [`<option value="">Every probed model</option>`]
+    .concat([...names].sort().map((id) => `<option value="${esc(id)}">${esc(id)}</option>`)).join("");
+  sel.value = current === "" || names.has(current) ? current : "";
+}
+
+function renderAlarms() {
+  const doc = alarms.doc;
+  $("zulipStatus").textContent = doc.zulipConfigured
+    ? "Zulip is configured. Messages are posted by the bot from the environment."
+    : "Zulip is not configured. Set ZULIP_SITE, ZULIP_EMAIL, and ZULIP_API_KEY, then restart. Alarms can still be saved.";
+  const box = $("alarmList");
+  if (!doc.alarms.length) box.innerHTML = `<p class="muted">No alarms yet.</p>`;
+  else box.innerHTML = doc.alarms.map((a) => {
+    const states = (doc.states || []).filter((s) => s.alarmId === a.id).map((s) => {
+      const bits = [s.model];
+      if (s.firing) bits.push("firing");
+      if (s.lastSentAt) bits.push(`sent ${ago(s.lastSentAt)}`);
+      if (s.lastError) bits.push(s.lastError);
+      return bits.join(" · ");
+    }).join(" ");
+    return `<div class="alarm-row">
+      <div>
+        <label class="check"><input type="checkbox" data-alarm-on="${esc(a.id)}" ${a.enabled ? "checked" : ""}> ${esc(alarmSummary(a))}</label>
+        ${states ? `<p class="sub">${esc(states)}</p>` : ""}
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost small" data-alarm-test="${esc(a.id)}" ${doc.zulipConfigured ? "" : "disabled"}>Test</button>
+        <button type="button" class="ghost danger small" data-alarm-del="${esc(a.id)}">Remove</button>
+      </div>
+    </div>`;
+  }).join("");
+  fillAlarmModels();
+  syncAlarmForm();
+}
+
+async function loadAlarms() {
+  if (alarms.busy) return;
+  try {
+    alarms.doc = await api("/api/alarms");
+    renderAlarms();
+  } catch (err) {
+    $("zulipStatus").textContent = err.message;
+  }
+}
+
+async function saveAlarms(next) {
+  alarms.busy = true;
+  try {
+    alarms.doc = await api("/api/alarms", { method: "PUT", body: { alarms: next } });
+    renderAlarms();
+    return true;
+  } catch (err) {
+    setMsg("alarmMsg", err.message, "err");
+    return false;
+  } finally {
+    alarms.busy = false;
+  }
+}
+
+$("alarmMetric").addEventListener("change", syncAlarmForm);
+$("alarmBaseline").addEventListener("change", syncAlarmForm);
+$("alarmForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const failure = $("alarmMetric").value === "failure";
+  const rule = {
+    enabled: true,
+    model: $("alarmModel").value,
+    metric: $("alarmMetric").value,
+    direction: failure ? "change" : $("alarmDirection").value,
+    threshold: failure ? 1 : Number($("alarmThreshold").value),
+    unit: failure ? "absolute" : $("alarmUnit").value,
+    baseline: failure ? "previous" : $("alarmBaseline").value,
+    windowMinutes: Number($("alarmWindow").value),
+    channel: $("alarmChannel").value.trim(),
+    topic: $("alarmTopic").value.trim(),
+  };
+  if (!rule.channel || !rule.topic) { setMsg("alarmMsg", "Channel and topic are required.", "err"); return; }
+  if (!failure && !(rule.threshold > 0)) { setMsg("alarmMsg", "Threshold must be greater than 0.", "err"); return; }
+  const ok = await saveAlarms([...(alarms.doc.alarms || []), rule]);
+  if (ok) {
+    $("alarmChannel").value = "";
+    $("alarmTopic").value = "";
+    setMsg("alarmMsg", "Alarm added.", "ok");
+  }
+});
+$("alarmList").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-alarm-del]");
+  const test = e.target.closest("[data-alarm-test]");
+  if (del) {
+    const ok = await saveAlarms(alarms.doc.alarms.filter((a) => a.id !== del.dataset.alarmDel));
+    if (ok) setMsg("alarmMsg", "Alarm removed.", "ok");
+  }
+  if (test) {
+    const rule = alarms.doc.alarms.find((a) => a.id === test.dataset.alarmTest);
+    if (!rule) return;
+    test.disabled = true;
+    try {
+      await api("/api/alarms/test", { method: "POST", body: { channel: rule.channel, topic: rule.topic } });
+      setMsg("alarmMsg", `Test message sent to #${rule.channel} / ${rule.topic}.`, "ok");
+    } catch (err) { setMsg("alarmMsg", err.message, "err"); }
+    finally { test.disabled = !alarms.doc.zulipConfigured; }
+  }
+});
+$("alarmList").addEventListener("change", async (e) => {
+  const box = e.target.closest("[data-alarm-on]");
+  if (!box) return;
+  const next = alarms.doc.alarms.map((a) => a.id === box.dataset.alarmOn ? { ...a, enabled: box.checked } : a);
+  const ok = await saveAlarms(next);
+  if (!ok) box.checked = !box.checked;
+});
 
 async function boot() {
   await loadModels();
   await loadDashboard();
+  await loadAlarms();
 }
 boot();

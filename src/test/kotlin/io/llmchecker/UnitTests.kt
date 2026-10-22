@@ -1,5 +1,7 @@
 package io.llmchecker
 
+import kotlinx.coroutines.runBlocking
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -40,6 +42,22 @@ class UnitTests {
         assertEquals("secret", settings.apiKey)
         assertTrue(settings.skipTlsVerify)
         assertEquals(30, settings.requestTimeoutSec)
+    }
+
+    @Test
+    fun zulipComesFromTheEnvironment() {
+        val zulip = AppConfig.fromEnv(
+            mapOf(
+                "ZULIP_SITE" to "https://chat.example.com/",
+                "ZULIP_EMAIL" to "bot@example.com",
+                "ZULIP_API_KEY" to "secret",
+            ),
+        ).zulip()
+        assertEquals("https://chat.example.com", zulip.site)
+        assertEquals("bot@example.com", zulip.email)
+        assertEquals("secret", zulip.apiKey)
+        assertTrue(zulip.configured)
+        assertTrue(!AppConfig.fromEnv(emptyMap()).zulip().configured)
     }
 
     @Test
@@ -100,5 +118,111 @@ class DashboardTests {
 
         val all = computeDashboard(samples, windowMinutes = 0, now = now)
         assertEquals(4, all.totalProbes)
+    }
+}
+
+class AlarmTests {
+    private fun sample(ts: Long, tps: Double? = 40.0, tokens: Int? = 64, ok: Boolean = true) =
+        MonitorSample(ts, "m", "openai", ok, if (ok) null else "boom", ttftMs = 80.0, totalMs = 1000.0, promptTokens = 200, completionTokens = tokens, decodeTps = tps)
+
+    private fun speed(baseline: String, threshold: Double = 10.0, direction: String = "drop", unit: String = "percent", window: Int = 0) =
+        AlarmRule(id = "a", model = "m", metric = "decodeTps", direction = direction, threshold = threshold, unit = unit, baseline = baseline, windowMinutes = window, channel = "ops", topic = "speed")
+
+    @Test
+    fun previousCheckTripsOnALargeEnoughDrop() {
+        val older = sample(1, tps = 100.0)
+        val current = sample(2, tps = 80.0)
+        val trip = judgeAlarm(listOf(older, current), current, speed("previous"))
+        assertTrue(trip is AlarmVerdict.Trip)
+        assertTrue(trip.message.contains("100 → 80"))
+        assertTrue(trip.message.contains("the previous check"))
+        assertTrue(judgeAlarm(listOf(older, sample(2, tps = 95.0)), sample(2, tps = 95.0), speed("previous")) is AlarmVerdict.Clear)
+        assertTrue(judgeAlarm(listOf(current), current, speed("previous")) is AlarmVerdict.Waiting)
+    }
+
+    @Test
+    fun windowAverageIgnoresTheCurrentCheck() {
+        val current = sample(3, tps = 50.0)
+        val history = listOf(sample(1, tps = 100.0), sample(2, tps = 100.0), current)
+        val verdict = judgeAlarm(history, current, speed("window"))
+        assertTrue(verdict is AlarmVerdict.Trip)
+        assertTrue(verdict.message.contains("100 → 50"))
+        assertTrue(verdict.message.contains("all-time average"))
+    }
+
+    @Test
+    fun lastFiveComparesTheNewestGroupWithTheFiveBefore() {
+        val slow = (1..5).map { sample(it.toLong(), tps = 100.0) }
+        val fast = (6..10).map { sample(it.toLong(), tps = 80.0) }
+        val current = fast.last()
+        val verdict = judgeAlarm(slow + fast, current, speed("last5"))
+        assertTrue(verdict is AlarmVerdict.Trip, verdict.toString())
+        assertTrue(verdict.message.contains("100 → 80"))
+        assertTrue(verdict.message.contains("5 checks before the latest 5"))
+        assertTrue(judgeAlarm(slow + fast.take(4), fast[3], speed("last5")) is AlarmVerdict.Waiting)
+    }
+
+    @Test
+    fun outputTokensUseAnAbsoluteRise() {
+        val older = sample(1, tokens = 64)
+        val current = sample(2, tokens = 70)
+        val rule = AlarmRule(id = "t", metric = "completionTokens", direction = "rise", threshold = 5.0, unit = "absolute", baseline = "previous", channel = "ops", topic = "tokens")
+        val verdict = judgeAlarm(listOf(older, current), current, rule)
+        assertTrue(verdict is AlarmVerdict.Trip)
+        assertTrue(verdict.message.contains("64 → 70"))
+        val small = sample(2, tokens = 68)
+        assertTrue(judgeAlarm(listOf(older, small), small, rule) is AlarmVerdict.Clear)
+    }
+
+    @Test
+    fun failureAlarmUsesTheNewestCheckOnly() {
+        val rule = AlarmRule(id = "f", metric = "failure", channel = "ops", topic = "down")
+        val failed = sample(2, ok = false)
+        val verdict = judgeAlarm(listOf(sample(1), failed), failed, rule)
+        assertTrue(verdict is AlarmVerdict.Trip)
+        assertTrue(verdict.message.contains("boom"))
+        assertTrue(judgeAlarm(listOf(sample(1), sample(2)), sample(2), rule) is AlarmVerdict.Clear)
+    }
+
+    @Test
+    fun alarmPostsOnceUntilTheModelRecovers() = runBlocking {
+        val stored = mutableListOf<MonitorSample>()
+        val sent = mutableListOf<String>()
+        val service = AlarmService(
+            ZulipConfig("https://chat.example", "bot@example.com", "key"),
+            Files.createTempDirectory("alarms"),
+            { stored.toList() },
+        ) { _, _, content -> sent += content }
+        service.replace(listOf(speed("previous")))
+        suspend fun check(ts: Long, tps: Double) {
+            val sample = sample(ts, tps)
+            stored += sample
+            service.onSample(sample)
+        }
+        check(1, 100.0)
+        check(2, 80.0)
+        check(3, 70.0)
+        assertEquals(1, sent.size)
+        assertTrue(service.view().states.single().firing)
+        check(4, 100.0)
+        assertTrue(!service.view().states.single().firing)
+        check(5, 80.0)
+        assertEquals(2, sent.size)
+    }
+
+    @Test
+    fun unconfiguredZulipDoesNotPost() = runBlocking {
+        val stored = mutableListOf<MonitorSample>()
+        var calls = 0
+        val service = AlarmService(ZulipConfig(), Files.createTempDirectory("alarms"), { stored.toList() }) { _, _, _ -> calls++ }
+        service.replace(listOf(speed("previous")))
+        val first = sample(1, tps = 100.0)
+        val second = sample(2, tps = 50.0)
+        stored += first
+        service.onSample(first)
+        stored += second
+        service.onSample(second)
+        assertEquals(0, calls)
+        assertEquals("Zulip is not configured", service.view().states.single().lastError)
     }
 }

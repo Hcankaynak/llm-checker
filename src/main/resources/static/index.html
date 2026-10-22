@@ -71,6 +71,75 @@
         </div>
       </form>
     </details>
+
+    <details class="card" id="alarmDetails">
+      <summary>Alarms</summary>
+      <p class="muted">After each check, an alarm compares that model with the baseline you pick. The first time it crosses the threshold, LLM Checker posts to the Zulip channel and topic. It stays quiet until the model recovers and crosses again.</p>
+      <p id="zulipStatus" class="muted">Checking Zulip...</p>
+      <div id="alarmList"></div>
+      <form id="alarmForm">
+        <div class="row two-col">
+          <label>Model
+            <select id="alarmModel"><option value="">Every probed model</option></select>
+          </label>
+          <label>Metric
+            <select id="alarmMetric">
+              <option value="decodeTps">Decode tokens/sec</option>
+              <option value="totalMs">Response time</option>
+              <option value="ttftMs">Time to first token</option>
+              <option value="completionTokens">Output tokens</option>
+              <option value="failure">Check failed</option>
+            </select>
+          </label>
+        </div>
+        <div id="alarmCompare">
+          <div class="row two-col">
+            <label>Direction
+              <select id="alarmDirection">
+                <option value="drop">Drops by</option>
+                <option value="rise">Rises by</option>
+                <option value="change">Changes by</option>
+              </select>
+            </label>
+            <label>Threshold <input id="alarmThreshold" type="number" min="0.1" step="any" value="10"></label>
+          </div>
+          <div class="row two-col">
+            <label>Amount
+              <select id="alarmUnit">
+                <option value="percent">Percent</option>
+                <option value="absolute">Absolute</option>
+              </select>
+            </label>
+            <label>Compare with
+              <select id="alarmBaseline">
+                <option value="window">Window average</option>
+                <option value="previous" selected>Previous check</option>
+                <option value="last5">Last 5 checks</option>
+              </select>
+            </label>
+          </div>
+          <div id="alarmWindowWrap" class="hidden">
+            <label>Average window
+              <select id="alarmWindow">
+                <option value="60">Last hour</option>
+                <option value="360">Last 6 hours</option>
+                <option value="1440" selected>Last 24 hours</option>
+                <option value="10080">Last 7 days</option>
+                <option value="0">All time</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="row two-col">
+          <label>Zulip channel <input id="alarmChannel" type="text" maxlength="100" placeholder="ops"></label>
+          <label>Topic <input id="alarmTopic" type="text" maxlength="200" placeholder="model speed"></label>
+        </div>
+        <div class="row">
+          <button class="primary" type="submit">Add alarm</button>
+        </div>
+      </form>
+      <div id="alarmMsg" class="msg"></div>
+    </details>
   </main>
 
   <div id="toast" class="toast hidden"></div>

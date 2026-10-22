@@ -10,6 +10,8 @@ One page. A table of models, fastest first, with average tokens/sec, average res
 
 Checks run in the background. Each one is a real generation, so the default is every 15 minutes: often enough to notice a slowdown during the day, light enough not to load the GPU. Change the interval, protocol, and prompt size under Probe settings. Samples are stored in `DATA_DIR`.
 
+Alarms are rules you add on the same page. Each one watches a model (or every probed model) and compares the new check with a window average, the previous check, or the last 5 checks. The first time decode speed, response time, time to first token, or output tokens crosses the threshold, or a check fails, the app posts to the Zulip channel and topic on that alarm. It stays quiet until the model recovers and crosses again. The bot's site, email, and API key come from the environment.
+
 There is a built-in mock vLLM server (`MOCK_ENABLED=true`) so you can try the app without a GPU.
 
 ## Technologies
@@ -78,6 +80,9 @@ The vLLM connection is environment variables only. Restart the app to change it.
 | `DATA_DIR` | `./data` | Probe settings and samples |
 | `MOCK_ENABLED` | `false` | Serve a fake vLLM at `/mock` and use it when `VLLM_BASE_URL` is empty |
 | `MOCK_SPEED` | `1.0` | Mock speed multiplier |
+| `ZULIP_SITE` | empty | Zulip server URL, for example `https://chat.example.com` |
+| `ZULIP_EMAIL` | empty | Bot email address |
+| `ZULIP_API_KEY` | empty | Bot API key |
 
 ## Tests
 
@@ -116,3 +121,5 @@ The tagged commit has to be in `main`'s history. The repository's Actions workfl
 | `GET/PUT /api/monitor` | Read or change the check schedule, models, and workload |
 | `POST /api/monitor/probe` | Run one check round now |
 | `GET/DELETE /api/monitor/samples` | Raw samples (`?minutes=&model=`), or clear them |
+| `GET/PUT /api/alarms` | Alarm rules, and whether Zulip is configured |
+| `POST /api/alarms/test` | Post one test message to a channel and topic |
