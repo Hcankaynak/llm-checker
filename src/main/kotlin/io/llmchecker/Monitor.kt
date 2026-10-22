@@ -75,6 +75,8 @@ class MonitorService(
     @Volatile private var lastRunAt: Long? = null
     @Volatile private var nextRunAt: Long? = null
     @Volatile private var note: String? = null
+    var onSample: (suspend (MonitorSample) -> Unit)? = null
+    var onSamplesCleared: (() -> Unit)? = null
 
     init {
         Files.createDirectories(dir)
@@ -160,6 +162,13 @@ class MonitorService(
                 for (model in cfg.models) {
                     val sample = probe(it, cfg, model)
                     record(sample)
+                    try {
+                        onSample?.invoke(sample)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        log.warn("Alarm check failed for {}", model, e)
+                    }
                     out += sample
                 }
             }
@@ -193,5 +202,6 @@ class MonitorService(
     fun clearSamples() {
         synchronized(samples) { samples.clear() }
         Files.deleteIfExists(samplesFile)
+        onSamplesCleared?.invoke()
     }
 }

@@ -83,4 +83,29 @@ class IntegrationTest {
         assertEquals(2, reloaded.samples(0, null).size)
         assertEquals(listOf("mock-model", "mock-coder-32b"), reloaded.status().config.models)
     }
+
+    @Test
+    fun savesAlarmsAndRefusesATestPostWithoutZulip() {
+        val http = java.net.http.HttpClient.newHttpClient()
+        val base = "http://127.0.0.1:$port"
+        fun send(path: String, method: String, body: String? = null): java.net.http.HttpResponse<String> {
+            val builder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + path))
+            if (body != null) builder.header("content-type", "application/json")
+            if (method == "GET") builder.GET() else builder.method(method, java.net.http.HttpRequest.BodyPublishers.ofString(body))
+            return http.send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString())
+        }
+        val saved = send(
+            "/api/alarms",
+            "PUT",
+            """{"alarms":[{"model":"mock-model","metric":"decodeTps","direction":"drop","threshold":10,"unit":"percent","baseline":"previous","channel":"ops","topic":"speed"}]}""",
+        )
+        assertEquals(200, saved.statusCode(), saved.body())
+        assertTrue(saved.body().contains("\"channel\":\"ops\""))
+        assertTrue(saved.body().contains("\"zulipConfigured\":false"))
+        val listed = send("/api/alarms", "GET")
+        assertEquals(200, listed.statusCode())
+        assertTrue(listed.body().contains("ops"))
+        val test = send("/api/alarms/test", "POST", """{"channel":"ops","topic":"speed"}""")
+        assertEquals(400, test.statusCode(), test.body())
+    }
 }

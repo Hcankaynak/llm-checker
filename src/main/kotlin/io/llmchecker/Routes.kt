@@ -18,11 +18,17 @@ private data class Health(val ok: Boolean, val version: String, val baseUrl: Str
 @Serializable
 private data class ProbeRequest(val models: List<String>? = null)
 
+@Serializable
+private data class AlarmTestRequest(val channel: String = "", val topic: String = "")
+
+@Serializable
+private data class OkResponse(val ok: Boolean = true)
+
 fun Route.staticRoutes() {
     staticResources("/", "static") { default("index.html") }
 }
 
-fun Route.apiRoutes(config: AppConfig, monitor: MonitorService) {
+fun Route.apiRoutes(config: AppConfig, monitor: MonitorService, alarms: AlarmService) {
     val settings = config.connection()
     route("/api") {
         get("/health") { call.respond(Health(true, "0.1.0", settings.baseUrl)) }
@@ -53,6 +59,16 @@ fun Route.apiRoutes(config: AppConfig, monitor: MonitorService) {
             delete("/samples") {
                 monitor.clearSamples()
                 call.respond(HttpStatusCode.NoContent)
+            }
+        }
+
+        route("/alarms") {
+            get { call.respond(alarms.view()) }
+            put { call.respond(alarms.replace(call.receive<AlarmsDocument>().alarms)) }
+            post("/test") {
+                val req = call.receive<AlarmTestRequest>()
+                alarms.sendTest(req.channel, req.topic)
+                call.respond(OkResponse())
             }
         }
     }
