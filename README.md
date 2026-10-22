@@ -46,7 +46,7 @@ docker run -d --name llm-checker -p 18642:18642 -v llm-checker-data:/data \
   -e VLLM_BASE_URL=http://your-vllm-host:8000 llm-checker
 ```
 
-Or with compose (`VLLM_BASE_URL`, `VLLM_API_KEY`, `VLLM_SKIP_TLS_VERIFY` and `MOCK_ENABLED` are read from your shell or a `.env` file):
+Or with compose, which pulls `ghcr.io/hcankaynak/llm-checker:latest` (`VLLM_BASE_URL`, `VLLM_API_KEY`, `VLLM_SKIP_TLS_VERIFY` and `MOCK_ENABLED` are read from your shell or a `.env` file):
 
 ```bash
 VLLM_BASE_URL=http://your-vllm-host:8000 docker compose up -d
@@ -93,12 +93,15 @@ Two GitHub Actions workflows live in `.github/workflows`.
 
 **Build** runs on every push and pull request. It runs `./gradlew build`, so the check is green only when the project compiles and the tests pass.
 
-**Publish image** runs when a git tag is pushed. It publishes only if that tag points at a commit on `main`. The image goes to GitHub Container Registry with the same tag, for example `ghcr.io/hcankaynak/llm-checker:v1.0.0`.
+**Publish image** pushes to GitHub Container Registry.
+
+- Every commit on `main` publishes `ghcr.io/hcankaynak/llm-checker:latest`. Pull requests do not move that tag. `docker-compose.yml` uses this image.
+- A git tag on `main` publishes a fixed image with the same name, for example `ghcr.io/hcankaynak/llm-checker:v0.0.1`. Later commits move only `:latest`.
 
 ```bash
 git checkout main
-git tag v1.0.0
-git push origin v1.0.0
+git tag v0.0.1
+git push origin v0.0.1
 ```
 
 The tagged commit has to be in `main`'s history. The repository's Actions workflow permissions need to be read and write so the workflow can push the package (Settings → Actions → General → Workflow permissions).

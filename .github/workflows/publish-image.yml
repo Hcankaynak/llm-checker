@@ -1,10 +1,12 @@
 name: Publish image
 
-# Pushing a git tag runs this workflow. The image is published only when the
-# tagged commit is on origin/main. The image tag matches the git tag:
-# ghcr.io/<repository>:<git-tag>
+# A push to main publishes ghcr.io/<repository>:latest.
+# A git tag publishes ghcr.io/<repository>:<git-tag> when that commit is on main.
+# Version tags stay put. Later commits on main move only :latest.
 on:
   push:
+    branches:
+      - main
     tags:
       - "**"
 
@@ -12,6 +14,10 @@ permissions:
   contents: read
   packages: write
   actions: write
+
+concurrency:
+  group: publish-image
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -24,24 +30,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require the tagged commit to be on main
+      - name: Choose the image tag
         id: gate
         run: |
           set -euo pipefail
-          if ! git fetch --no-tags origin main; then
-            echo "::error::origin/main does not exist. Push main, then tag a commit on it."
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-            echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on origin/main, so no image was published."
-            exit 1
-          fi
-          tag="${GITHUB_REF_NAME}"
-          if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "::error::Tag '${tag}' is not a valid Docker tag. Use letters, digits, underscore, period, and hyphen."
-            exit 1
-          fi
           image="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if ! git fetch --no-tags origin main; then
+              echo "::error::origin/main does not exist. Push main, then tag a commit on it."
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+              echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on origin/main, so no image was published."
+              exit 1
+            fi
+            tag="${GITHUB_REF_NAME}"
+            if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::Tag '${tag}' is not a valid Docker tag. Use letters, digits, underscore, period, and hyphen."
+              exit 1
+            fi
+          else
+            tag="latest"
+          fi
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "Publishing ${image}:${tag} from ${GITHUB_SHA}"
