@@ -45,6 +45,15 @@ class UnitTests {
     }
 
     @Test
+    fun tlsVerificationIsSkippedUnlessTurnedOff() {
+        assertEquals(true, AppConfig.fromEnv(emptyMap()).skipTlsVerify)
+        assertEquals(true, AppConfig.fromEnv(mapOf("VLLM_SKIP_TLS_VERIFY" to "yes")).skipTlsVerify)
+        for (value in listOf("false", "FALSE", "0", "no", "off")) {
+            assertEquals(false, AppConfig.fromEnv(mapOf("VLLM_SKIP_TLS_VERIFY" to value)).skipTlsVerify, value)
+        }
+    }
+
+    @Test
     fun zulipComesFromTheEnvironment() {
         val zulip = AppConfig.fromEnv(
             mapOf(
