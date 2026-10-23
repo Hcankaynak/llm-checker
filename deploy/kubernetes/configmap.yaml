@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-checker
+  namespace: llm-checker
+  labels:
+    app.kubernetes.io/name: llm-checker
+data:
+  # Base URL of the vLLM server, as seen from this pod. A trailing /v1 is fine.
+  VLLM_BASE_URL: "http://vllm.example.internal:8000"
+  # Closed-network certificates are accepted. Set to "false" to verify the certificate.
+  VLLM_SKIP_TLS_VERIFY: "true"
+  VLLM_TIMEOUT_SEC: "600"
+  MOCK_ENABLED: "false"
+  MOCK_SPEED: "1.0"
+  # Zulip site for alarms, for example https://chat.example.com. Leave empty to disable sending.
+  ZULIP_SITE: ""
+  DATA_DIR: "/data"

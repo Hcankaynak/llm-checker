@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llm-checker
+  namespace: llm-checker
+  labels:
+    app.kubernetes.io/name: llm-checker
+  annotations:
+    # A manual probe can run as long as VLLM_TIMEOUT_SEC. These are read by ingress-nginx.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - llm-checker.example.com
+      secretName: llm-checker-tls
+  rules:
+    - host: llm-checker.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: llm-checker
+                port:
+                  name: http

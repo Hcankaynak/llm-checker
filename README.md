@@ -65,6 +65,27 @@ gunzip -c llm-checker.tar.gz | docker load
 
 When vLLM runs on the Docker host itself, `localhost` inside the container is the container. Use the host's address, or on Linux add `--add-host=host.docker.internal:host-gateway` and use `http://host.docker.internal:8000`.
 
+### Kubernetes
+
+Manifests in `deploy/kubernetes` run one pod from `ghcr.io/hcankaynak/llm-checker:latest`, store probes on a persistent volume, and expose it with a ClusterIP Service and an Ingress. Edit the vLLM address, secrets, and ingress host before applying:
+
+```bash
+kubectl apply -k deploy/kubernetes
+```
+
+`VLLM_BASE_URL` is in `configmap.yaml`. `VLLM_API_KEY`, `ZULIP_EMAIL`, and `ZULIP_API_KEY` are in `secret.yaml`. The Ingress host is `llm-checker.example.com` and `ingressClassName` is `nginx`; change both to match the cluster. Delete the `tls` block for plain HTTP, or create a secret named `llm-checker-tls` for that host. A check started from the UI can take as long as `VLLM_TIMEOUT_SEC`, so the Ingress annotations keep the nginx proxy open for 600 seconds.
+
+The image is private. If the cluster can reach GitHub Container Registry, create a pull secret and uncomment `imagePullSecrets` in `deployment.yaml`:
+
+```bash
+kubectl -n llm-checker create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io \
+  --docker-username=YOUR_GITHUB_USER \
+  --docker-password=YOUR_GITHUB_TOKEN
+```
+
+On a closed network, import the image into the cluster registry, set `image` to that name, and leave `imagePullPolicy: IfNotPresent`. Keep `replicas: 1`: the data volume is ReadWriteOnce. Without an Ingress controller, reach the Service with `kubectl -n llm-checker port-forward svc/llm-checker 18642:80`.
+
 ### Configuration
 
 The vLLM connection is environment variables only. Restart the app to change it.

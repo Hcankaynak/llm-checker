@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-checker
+  namespace: llm-checker
+  labels:
+    app.kubernetes.io/name: llm-checker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: llm-checker
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
