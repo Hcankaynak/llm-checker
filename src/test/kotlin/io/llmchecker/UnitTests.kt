@@ -1,9 +1,15 @@
 package io.llmchecker
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -224,5 +230,29 @@ class AlarmTests {
         service.onSample(second)
         assertEquals(0, calls)
         assertEquals("Zulip is not configured", service.view().states.single().lastError)
+    }
+
+    @Test
+    fun logsProbeRunFailures() = runBlocking {
+        val logger = LoggerFactory.getLogger(MonitorService::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        val monitor = MonitorService(this, Settings(baseUrl = ""), Files.createTempDirectory("monitor-log"))
+        try {
+            monitor.update(MonitorConfig(enabled = true, intervalSec = 30, models = listOf("m"), promptTokens = 16, outputTokens = 1))
+            val deadline = System.currentTimeMillis() + 5_000
+            while (System.currentTimeMillis() < deadline && appender.list.none { it.message == "Probe run failed" }) {
+                delay(20)
+            }
+            val event = appender.list.find { it.message == "Probe run failed" }
+            assertNotNull(event)
+            assertNotNull(event.throwableProxy)
+            assertTrue(event.throwableProxy!!.message.orEmpty().contains("No vLLM base URL"))
+        } finally {
+            monitor.update(MonitorConfig(enabled = false))
+            logger.detachAppender(appender)
+            appender.stop()
+        }
     }
 }

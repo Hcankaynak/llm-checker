@@ -1,10 +1,14 @@
 package io.llmchecker
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
 import kotlinx.coroutines.runBlocking
+import org.slf4j.LoggerFactory
 import java.net.ServerSocket
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -107,5 +111,65 @@ class IntegrationTest {
         assertTrue(listed.body().contains("ops"))
         val test = send("/api/alarms/test", "POST", """{"channel":"ops","topic":"speed"}""")
         assertEquals(400, test.statusCode(), test.body())
+    }
+
+    @Test
+    fun logsEachModelRequestWithLatencyAndErrors() = runBlocking {
+        val logger = LoggerFactory.getLogger(VllmClient::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        val closed = ServerSocket(0).use { it.localPort }
+        try {
+            VllmClient(settings).use { client ->
+                val (models, _) = client.listModels()
+                assertEquals(listOf("mock-model", "mock-coder-32b"), models.map { it.id })
+                val outcome = client.stream(
+                    StreamRequest("openai", "mock-model", "hello world ".repeat(20), 8, true, 0.0),
+                    System.nanoTime(),
+                    0,
+                )
+                assertTrue(outcome.result.ok, outcome.result.error)
+            }
+            VllmClient(Settings(baseUrl = "http://127.0.0.1:$port/does-not-exist")).use { client ->
+                val outcome = client.stream(StreamRequest("openai", "missing-model", "hi", 4, false, 0.0), System.nanoTime(), 0)
+                assertTrue(!outcome.result.ok)
+                assertEquals(404, outcome.result.httpStatus)
+                var failed = false
+                try {
+                    client.listModels()
+                } catch (e: UpstreamException) {
+                    failed = true
+                    assertTrue(e.message!!.contains("did not return JSON"), e.message)
+                }
+                assertTrue(failed)
+            }
+            VllmClient(Settings(baseUrl = "http://127.0.0.1:$closed")).use { client ->
+                var failed = false
+                try {
+                    client.listModels()
+                } catch (e: UpstreamException) {
+                    failed = true
+                }
+                assertTrue(failed)
+            }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+
+        val lines = appender.list.map { it.formattedMessage }
+        assertTrue(lines.any { it == "Fetching models from ${settings.baseUrl}" })
+        assertTrue(lines.any { it.matches(Regex("Fetched 2 models from ${Regex.escape(settings.baseUrl)} in \\d+\\.\\d ms")) })
+        assertTrue(lines.any { it == "Request to mock-model started" })
+        assertTrue(lines.any { it.matches(Regex("Request to mock-model succeeded in \\d+\\.\\d ms")) })
+        assertTrue(lines.any { it == "Request to missing-model started" })
+        assertTrue(lines.any { it.matches(Regex("Request to missing-model failed in \\d+\\.\\d ms: HTTP 404:.*")) })
+        val httpFailure = appender.list.first { it.formattedMessage.startsWith("Could not fetch models from http://127.0.0.1:$port/does-not-exist") }
+        assertTrue(httpFailure.formattedMessage.contains("did not return JSON"), httpFailure.formattedMessage)
+        assertTrue(httpFailure.formattedMessage.contains(" in ") && httpFailure.formattedMessage.contains(" ms:"))
+        val refused = appender.list.first { it.formattedMessage.startsWith("Could not fetch models from http://127.0.0.1:$closed") }
+        assertNotNull(refused.throwableProxy)
+        assertTrue(refused.formattedMessage.contains(" in ") && refused.formattedMessage.contains(" ms:"))
     }
 }
