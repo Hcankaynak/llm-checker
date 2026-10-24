@@ -37,7 +37,9 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import org.slf4j.LoggerFactory
 import java.security.cert.X509Certificate
+import java.util.Locale
 import javax.net.ssl.X509TrustManager
 
 class UpstreamException(message: String, val status: Int? = null) : Exception(message)
@@ -72,6 +74,7 @@ private object TrustAllManager : X509TrustManager {
 
 class VllmClient(private val settings: Settings) : AutoCloseable {
     val root: String = normalizeBaseUrl(settings.baseUrl)
+    private val log = LoggerFactory.getLogger(VllmClient::class.java)
 
     private val http = HttpClient(CIO) {
         expectSuccess = false
@@ -108,22 +111,31 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
     }
 
     suspend fun listModels(): Pair<List<ModelInfo>, Double> {
+        log.info("Fetching models from {}", root)
         val t0 = System.nanoTime()
         val resp = try {
             http.get { url("$root/v1/models"); authHeaders() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            val elapsed = (System.nanoTime() - t0) / 1e6
+            log.warn("Could not fetch models from {} in {} ms: {}", root, formatMillis(elapsed), describe(e), e)
             throw UpstreamException("Cannot reach $root: ${describe(e)}")
         }
         val latency = (System.nanoTime() - t0) / 1e6
         val text = resp.bodyAsText()
         if (!resp.status.isSuccess()) {
-            throw UpstreamException("GET /v1/models returned HTTP ${resp.status.value}: ${text.take(300)}", resp.status.value)
+            val message = "GET /v1/models returned HTTP ${resp.status.value}: ${text.take(300)}"
+            log.warn("Could not fetch models from {} in {} ms: {}", root, formatMillis(latency), message)
+            throw UpstreamException(message, resp.status.value)
         }
-        val root = runCatching { AppJson.parseToJsonElement(text).jsonObject }.getOrNull()
-            ?: throw UpstreamException("GET /v1/models did not return JSON. Is this a vLLM/OpenAI-compatible server?")
-        val models = root["data"]?.jsonArray?.mapNotNull { el ->
+        val parsed = runCatching { AppJson.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: run {
+                val message = "GET /v1/models did not return JSON. Is this a vLLM/OpenAI-compatible server?"
+                log.warn("Could not fetch models from {} in {} ms: {}", root, formatMillis(latency), message)
+                throw UpstreamException(message)
+            }
+        val models = parsed["data"]?.jsonArray?.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
             ModelInfo(
@@ -134,6 +146,7 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
                 created = o["created"]?.jsonPrimitive?.longOrNull,
             )
         }.orEmpty()
+        log.info("Fetched {} models from {} in {} ms", models.size, root, formatMillis(latency))
         return models to latency
     }
 
@@ -165,6 +178,7 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
         val path = if (anthropic) "/v1/messages" else "/v1/chat/completions"
         val body = chatBody(req, stream = true).toString()
 
+        log.info("Request to {} started", req.model)
         val start = System.nanoTime()
         val startOffsetMs = (start - runStartNanos) / 1e6
         var firstTokenAt = 0L
@@ -176,12 +190,18 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
         var httpStatus: Int? = null
         val gaps = ArrayList<Double>()
 
-        fun fail(message: String): StreamOutcome {
+        fun fail(message: String, error: Throwable? = null): StreamOutcome {
             val end = System.nanoTime()
+            val totalMs = (end - start) / 1e6
+            if (error != null) {
+                log.warn("Request to {} failed in {} ms: {}", req.model, formatMillis(totalMs), message, error)
+            } else {
+                log.warn("Request to {} failed in {} ms: {}", req.model, formatMillis(totalMs), message)
+            }
             return StreamOutcome(
                 RequestResult(
                     index = index, ok = false, error = message, httpStatus = httpStatus,
-                    startOffsetMs = startOffsetMs, totalMs = (end - start) / 1e6,
+                    startOffsetMs = startOffsetMs, totalMs = totalMs,
                     ttftMs = if (firstTokenAt > 0) (firstTokenAt - start) / 1e6 else null,
                 ),
                 gaps.toDoubleArray(),
@@ -257,7 +277,7 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            return fail(describe(e))
+            return fail(describe(e), e)
         }
 
         val end = System.nanoTime()
@@ -271,6 +291,7 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
         val decodeTps = if (completion > 1 && decodeWindowMs > 0) (completion - 1) / (decodeWindowMs / 1000.0) else null
         val tpot = if (completion > 1 && decodeWindowMs > 0) decodeWindowMs / (completion - 1) else null
         val e2eTps = if (totalMs > 0) completion / (totalMs / 1000.0) else null
+        log.info("Request to {} succeeded in {} ms", req.model, formatMillis(totalMs))
 
         return StreamOutcome(
             RequestResult(
@@ -285,6 +306,8 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
 
     override fun close() = http.close()
 }
+
+private fun formatMillis(ms: Double): String = String.format(Locale.US, "%.1f", ms)
 
 fun describe(e: Throwable): String {
     val name = e::class.simpleName ?: "Error"
