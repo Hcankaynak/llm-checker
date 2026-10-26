@@ -117,6 +117,8 @@ private suspend fun io.ktor.server.routing.RoutingContext.handleChat(state: Mock
         return
     }
     val model = body["model"]?.jsonPrimitive?.content ?: "mock-model"
+    // Test hook: hold this response open so a probe of "stall" can time out on its own.
+    if (model == "stall") delay(15_000)
     val maxTokens = body["max_tokens"]?.jsonPrimitive?.int ?: 64
     val stream = body["stream"]?.jsonPrimitive?.boolean ?: false
     val prompt = body["messages"]?.jsonArray?.joinToString("\n") { it.jsonObject["content"]?.jsonPrimitive?.content.orEmpty() }.orEmpty()

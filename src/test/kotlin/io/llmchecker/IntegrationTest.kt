@@ -172,4 +172,39 @@ class IntegrationTest {
         assertNotNull(refused.throwableProxy)
         assertTrue(refused.formattedMessage.contains(" in ") && refused.formattedMessage.contains(" ms:"))
     }
+
+    @Test
+    fun aSlowModelDoesNotBlockTheOthers() = runBlocking {
+        val logger = LoggerFactory.getLogger(VllmClient::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        val dir = Files.createTempDirectory("monitor-parallel")
+        val monitor = MonitorService(this, settings.copy(requestTimeoutSec = 2), dir)
+        try {
+            val started = System.nanoTime()
+            val taken = monitor.probeNow(listOf("stall", "mock-model"))
+            val elapsedMs = (System.nanoTime() - started) / 1e6
+            assertEquals(listOf("stall", "mock-model"), taken.map { it.model })
+            val fast = taken.single { it.model == "mock-model" }
+            val stalled = taken.single { it.model == "stall" }
+            assertTrue(fast.ok, fast.error)
+            assertTrue(!stalled.ok, "stall should time out, error=${stalled.error}")
+            assertTrue(stalled.totalMs >= 1_000, "stall finished too quickly: ${stalled.totalMs} ms (${stalled.error})")
+            assertTrue(elapsedMs < 8_000, "probe waited ${elapsedMs} ms; a timeout should not stack with the other model")
+
+            val lines = appender.list.map { it.formattedMessage }
+            val fastOk = lines.indexOfFirst { it.startsWith("Request to mock-model succeeded in ") && it.endsWith(" ms") }
+            val stallFail = lines.indexOfFirst { it.startsWith("Request to stall failed in ") && it.contains(" ms:") }
+            assertTrue(lines.contains("Request to stall started"))
+            assertTrue(lines.contains("Request to mock-model started"))
+            assertTrue(fastOk >= 0, lines.joinToString("\n"))
+            assertTrue(stallFail >= 0, lines.joinToString("\n"))
+            assertTrue(fastOk < stallFail, "fast model waited for the stalled one:\n${lines.joinToString("\n")}")
+            assertEquals(2, monitor.samples(0, null).size)
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
 }

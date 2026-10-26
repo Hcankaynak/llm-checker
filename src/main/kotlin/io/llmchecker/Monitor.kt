@@ -3,15 +3,20 @@ package io.llmchecker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.util.Locale
 import java.util.UUID
 
 @Serializable
@@ -69,6 +74,7 @@ class MonitorService(
     private val samplesFile = dir.resolve("monitor-samples.jsonl")
     private val samples = ArrayDeque<MonitorSample>()
     private val probeLock = Mutex()
+    private val onSampleLock = Mutex()
     private var loop: Job? = null
 
     @Volatile private var config: MonitorConfig = loadConfig()
@@ -108,10 +114,10 @@ class MonitorService(
         synchronized(samples) {
             samples.addLast(sample)
             while (samples.size > maxSamples) samples.removeFirst()
+            runCatching {
+                Files.writeString(samplesFile, AppJson.encodeToString(sample) + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+            }.onFailure { log.warn("Could not persist monitor sample", it) }
         }
-        runCatching {
-            Files.writeString(samplesFile, AppJson.encodeToString(sample) + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
-        }.onFailure { log.warn("Could not persist monitor sample", it) }
     }
 
     fun status() = MonitorStatus(config, probeLock.isLocked, lastRunAt, if (config.enabled) nextRunAt else null, note, synchronized(samples) { samples.size })
@@ -157,20 +163,13 @@ class MonitorService(
     private suspend fun probeAll(cfg: MonitorConfig): List<MonitorSample> {
         if (!probeLock.tryLock()) throw IllegalStateException("A probe is already in progress")
         try {
-            val out = mutableListOf<MonitorSample>()
-            val client = VllmClient(settings)
-            client.use {
-                for (model in cfg.models) {
-                    val sample = probe(it, cfg, model)
-                    record(sample)
-                    try {
-                        onSample?.invoke(sample)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        log.warn("Alarm check failed for {}", model, e)
-                    }
-                    out += sample
+            val out = VllmClient(settings).use { client ->
+                // Each model runs on its own child job. A timeout cancels only that job.
+                supervisorScope {
+                    val run = coroutineContext[Job]!!
+                    cfg.models.map { model ->
+                        async { probeOne(client, cfg, model, run) }
+                    }.awaitAll()
                 }
             }
             lastRunAt = System.currentTimeMillis()
@@ -179,6 +178,37 @@ class MonitorService(
         } finally {
             probeLock.unlock()
         }
+    }
+
+    private suspend fun probeOne(client: VllmClient, cfg: MonitorConfig, model: String, run: Job): MonitorSample {
+        val started = System.nanoTime()
+        val sample = try {
+            probe(client, cfg, model)
+        } catch (e: CancellationException) {
+            if (!run.isActive) throw e
+            failedProbe(cfg, model, started, e)
+        } catch (e: Exception) {
+            failedProbe(cfg, model, started, e)
+        }
+        record(sample)
+        try {
+            onSampleLock.withLock { onSample?.invoke(sample) }
+        } catch (e: CancellationException) {
+            if (!run.isActive) throw e
+            log.warn("Alarm check failed for {}", model, e)
+        } catch (e: Exception) {
+            log.warn("Alarm check failed for {}", model, e)
+        }
+        return sample
+    }
+
+    private fun failedProbe(cfg: MonitorConfig, model: String, startedNanos: Long, error: Throwable): MonitorSample {
+        val elapsed = (System.nanoTime() - startedNanos) / 1e6
+        log.warn("Request to {} failed in {} ms: {}", model, String.format(Locale.US, "%.1f", elapsed), describe(error), error)
+        return MonitorSample(
+            ts = System.currentTimeMillis(), model = model, protocol = cfg.protocol,
+            ok = false, error = describe(error), totalMs = elapsed,
+        )
     }
 
     private suspend fun probe(client: VllmClient, cfg: MonitorConfig, model: String): MonitorSample {

@@ -2,6 +2,7 @@ package io.llmchecker
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
@@ -275,6 +276,8 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
             }
             if (error != null) return fail(error)
         } catch (e: CancellationException) {
+            val timeout = timeoutCause(e)
+            if (timeout != null) return fail(describe(timeout), timeout)
             throw e
         } catch (e: Exception) {
             return fail(describe(e), e)
@@ -308,6 +311,17 @@ class VllmClient(private val settings: Settings) : AutoCloseable {
 }
 
 private fun formatMillis(ms: Double): String = String.format(Locale.US, "%.1f", ms)
+
+private fun timeoutCause(error: Throwable): Throwable? {
+    val seen = HashSet<Throwable>()
+    var current: Throwable? = error
+    while (current != null && seen.add(current)) {
+        if (current is HttpRequestTimeoutException || current is java.net.SocketTimeoutException) return current
+        if (current is java.net.ConnectException && current.message?.contains("timeout", ignoreCase = true) == true) return current
+        current = current.cause
+    }
+    return null
+}
 
 fun describe(e: Throwable): String {
     val name = e::class.simpleName ?: "Error"
