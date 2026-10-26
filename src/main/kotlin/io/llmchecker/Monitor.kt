@@ -140,6 +140,7 @@ class MonitorService(
                     throw e
                 } catch (e: Exception) {
                     note = describe(e)
+                    log.warn("Probe run failed", e)
                 }
                 nextRunAt = System.currentTimeMillis() + cfg.intervalSec * 1000L
                 delay(cfg.intervalSec * 1000L)
